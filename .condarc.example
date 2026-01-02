@@ -1,0 +1,23 @@
+# Conda configuration file example
+# Copy this to ~/.condarc or create .condarc in project root
+
+# Channels (conda-forge is recommended for better package availability)
+channels:
+  - conda-forge
+  - defaults
+
+# Always yes to confirmations (optional, for automation)
+# always_yes: true
+
+# Show channel URLs (optional, useful for debugging)
+# show_channel_urls: true
+
+# Automatically update conda (optional)
+# auto_update_conda: true
+
+# Number of workers for parallel operations (optional)
+# number_workers: 4
+
+# Use pip interop (allows conda and pip to work better together)
+# pip_interop_enabled: true
+

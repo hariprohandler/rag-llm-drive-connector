@@ -1,0 +1,44 @@
+name: rag-llm-drive-connector
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - postgresql
+  - pip:
+    # Core dependencies
+    - fastapi>=0.104.0
+    - uvicorn[standard]>=0.24.0
+    - python-multipart>=0.0.6
+    
+    # LangChain and RAG
+    - langchain>=0.1.0
+    - langchain-community>=0.0.10
+    - langchain-openai>=0.0.2
+    - langchain-core>=0.1.12
+    
+    # Vector database
+    - pgvector>=0.2.3
+    - psycopg2-binary>=2.9.9
+    
+    # OAuth and Drive connectors
+    - google-auth>=2.23.4
+    - google-auth-oauthlib>=1.1.0
+    - google-auth-httplib2>=0.1.1
+    - google-api-python-client>=2.108.0
+    - msal>=1.25.0
+    
+    # UI
+    - gradio>=4.7.1
+    
+    # Document loaders
+    - pypdf>=3.17.4
+    - python-docx>=1.1.0
+    
+    # Utilities
+    - python-dotenv>=1.0.0
+    - pydantic>=2.5.0
+    - pydantic-settings>=2.1.0
+    - tiktoken>=0.5.2
+

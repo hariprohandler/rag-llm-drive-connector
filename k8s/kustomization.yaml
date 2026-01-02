@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: rag-system
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml.example
+  - postgres-deployment.yaml
+  - app-deployment.yaml
+  - ingress.yaml
+
+commonLabels:
+  app: rag-llm-drive-connector
+  managed-by: kustomize
+
+images:
+  - name: rag-llm-drive-connector
+    newName: your-registry/rag-llm-drive-connector
+    newTag: latest
+
