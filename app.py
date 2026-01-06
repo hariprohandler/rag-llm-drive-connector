@@ -8,8 +8,9 @@ from typing import Optional
 from sqlalchemy.orm import Session
 import gradio as gr
 import uvicorn
-import config
-import models
+from app.core.config import settings
+from app.models import User, Base, KnowledgeBase
+from app.models.base import get_db
 from auth_service import get_current_user
 from auth_oauth import (
     get_google_auth_url,
@@ -17,16 +18,16 @@ from auth_oauth import (
     get_microsoft_auth_url,
     handle_microsoft_callback
 )
-from rag import ask_question
-from ingest import ingest_google_drive, ingest_onedrive, ingest_local_files
-from llm_service import (
+from app.services.rag import ask_question
+from app.services.ingest import ingest_google_drive, ingest_onedrive, ingest_local_files
+from app.services.llm_service import (
     create_llm_config,
     get_llm_configs,
     get_llm_config,
     update_llm_config,
     delete_llm_config
 )
-from chat_service import (
+from app.services.chat_service import (
     create_conversation,
     get_conversations,
     get_conversation,
@@ -41,7 +42,8 @@ import tempfile
 import os
 
 # Initialize database
-models.init_db()
+from app.models.base import init_db
+init_db()
 
 app = FastAPI(title="RAG LLM Drive Connector", version="1.0.0")
 
@@ -175,7 +177,7 @@ async def microsoft_callback(
 
 
 @app.get("/auth/me")
-async def get_current_user_info(current_user: models.User = Depends(get_current_user)):
+async def get_current_user_info(current_user: User = Depends(get_current_user)):
     """Get current user information."""
     return current_user.to_dict()
 
@@ -185,8 +187,8 @@ async def get_current_user_info(current_user: models.User = Depends(get_current_
 async def query(
     request_body: QueryRequest,
     fastapi_request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     llm_config_id: Optional[int] = None,
     use_rag: bool = True
 ):
@@ -209,8 +211,8 @@ async def query(
 @app.post("/api/ingest/google-drive")
 async def ingest_google(
     request: IngestDriveRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Ingest documents from Google Drive (requires authentication)."""
     # TODO: Retrieve stored credentials for user (implement credential storage)
@@ -236,8 +238,8 @@ async def ingest_google(
 @app.post("/api/ingest/onedrive")
 async def ingest_onedrive_endpoint(
     request: IngestOneDriveRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Ingest documents from OneDrive (requires authentication)."""
     # TODO: Retrieve stored credentials for user (implement credential storage)
@@ -250,8 +252,8 @@ async def ingest_onedrive_endpoint(
 @app.post("/api/ingest/files")
 async def ingest_files(
     request: FileUploadRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Ingest local files (requires authentication)."""
     try:
@@ -277,8 +279,8 @@ async def ingest_files(
 async def upload_files(
     files: list[UploadFile] = File(...),
     knowledge_base_name: Optional[str] = None,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Upload and ingest files (requires authentication)."""
     try:
@@ -319,8 +321,8 @@ async def upload_files(
 @app.post("/api/llm-configs")
 async def create_llm_config_endpoint(
     request: LLMConfigRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Create a new LLM configuration."""
     try:
@@ -342,8 +344,8 @@ async def create_llm_config_endpoint(
 
 @app.get("/api/llm-configs")
 async def list_llm_configs(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get all LLM configurations for the current user."""
     configs = get_llm_configs(db, current_user.id)
@@ -353,8 +355,8 @@ async def list_llm_configs(
 @app.get("/api/llm-configs/{config_id}")
 async def get_llm_config_endpoint(
     config_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get a specific LLM configuration."""
     config_obj = get_llm_config(db, current_user.id, config_id)
@@ -367,8 +369,8 @@ async def get_llm_config_endpoint(
 async def update_llm_config_endpoint(
     config_id: int,
     request: LLMConfigUpdateRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Update an LLM configuration."""
     config_obj = update_llm_config(
@@ -391,8 +393,8 @@ async def update_llm_config_endpoint(
 @app.delete("/api/llm-configs/{config_id}")
 async def delete_llm_config_endpoint(
     config_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Delete an LLM configuration."""
     success = delete_llm_config(db, current_user.id, config_id)
@@ -404,13 +406,13 @@ async def delete_llm_config_endpoint(
 # Knowledge Base endpoints
 @app.get("/api/knowledge-bases")
 async def list_knowledge_bases(
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get all knowledge bases for the current user."""
-    kbs = db.query(models.KnowledgeBase).filter(
-        models.KnowledgeBase.user_id == current_user.id,
-        models.KnowledgeBase.is_active == True
+    kbs = db.query(KnowledgeBase).filter(
+        KnowledgeBase.user_id == current_user.id,
+        KnowledgeBase.is_active == True
     ).all()
     return [kb.to_dict() for kb in kbs]
 
@@ -418,13 +420,13 @@ async def list_knowledge_bases(
 @app.get("/api/knowledge-bases/{kb_id}")
 async def get_knowledge_base(
     kb_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get a specific knowledge base."""
-    kb = db.query(models.KnowledgeBase).filter(
-        models.KnowledgeBase.id == kb_id,
-        models.KnowledgeBase.user_id == current_user.id
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.user_id == current_user.id
     ).first()
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
@@ -434,13 +436,13 @@ async def get_knowledge_base(
 @app.delete("/api/knowledge-bases/{kb_id}")
 async def delete_knowledge_base(
     kb_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Soft delete a knowledge base."""
-    kb = db.query(models.KnowledgeBase).filter(
-        models.KnowledgeBase.id == kb_id,
-        models.KnowledgeBase.user_id == current_user.id
+    kb = db.query(KnowledgeBase).filter(
+        KnowledgeBase.id == kb_id,
+        KnowledgeBase.user_id == current_user.id
     ).first()
     if not kb:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
@@ -453,8 +455,8 @@ async def delete_knowledge_base(
 @app.post("/api/chat/conversations")
 async def create_chat_conversation(
     request: ConversationRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Create a new chat conversation."""
     conversation = create_conversation(
@@ -471,8 +473,8 @@ async def create_chat_conversation(
 @app.get("/api/chat/conversations")
 async def list_chat_conversations(
     is_private: Optional[bool] = None,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get all chat conversations for the current user."""
     conversations = get_conversations(db, current_user.id, is_private)
@@ -482,8 +484,8 @@ async def list_chat_conversations(
 @app.get("/api/chat/conversations/{conversation_id}")
 async def get_chat_conversation(
     conversation_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get a specific chat conversation with messages."""
     conversation = get_conversation(db, current_user.id, conversation_id)
@@ -500,8 +502,8 @@ async def get_chat_conversation(
 async def update_chat_conversation(
     conversation_id: int,
     request: ConversationUpdateRequest,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Update a chat conversation."""
     conversation = update_conversation(
@@ -521,8 +523,8 @@ async def update_chat_conversation(
 @app.delete("/api/chat/conversations/{conversation_id}")
 async def delete_chat_conversation(
     conversation_id: int,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Delete a chat conversation."""
     success = delete_conversation(db, current_user.id, conversation_id)
@@ -535,8 +537,8 @@ async def delete_chat_conversation(
 async def send_chat_message(
     request: ChatMessageRequest,
     fastapi_request: Request,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Send a message in a chat conversation."""
     try:
@@ -599,8 +601,8 @@ async def send_chat_message(
 async def get_chat_messages(
     conversation_id: int,
     limit: Optional[int] = None,
-    current_user: models.User = Depends(get_current_user),
-    db: Session = Depends(models.get_db)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get messages for a conversation."""
     conversation = get_conversation(db, current_user.id, conversation_id)
@@ -632,7 +634,7 @@ async def health_check():
     try:
         # Check database connection
         import psycopg2
-        db_url = config.settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
+        db_url = settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
         conn = psycopg2.connect(db_url, connect_timeout=5)
         conn.close()
         db_status = "healthy"
@@ -651,7 +653,7 @@ async def readiness_check():
     """Readiness probe for Kubernetes."""
     try:
         import psycopg2
-        db_url = config.settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
+        db_url = settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
         conn = psycopg2.connect(db_url, connect_timeout=5)
         conn.close()
         return {"status": "ready"}
@@ -675,7 +677,7 @@ def gradio_query(query: str, token: str = ""):
         user_id = payload.get("sub")
         
         # Create database session for Gradio
-        db = next(models.get_db())
+        db = next(get_db())
         try:
             result = ask_question(
                 query=query,
@@ -815,7 +817,7 @@ async def startup_event():
     def launch_gradio():
         gr_app.launch(
             server_name="0.0.0.0",
-            server_port=config.settings.gradio_port,
+            server_port=settings.gradio_port,
             share=False,
             inbrowser=False
         )
@@ -827,6 +829,6 @@ async def startup_event():
 if __name__ == "__main__":
     uvicorn.run(
         app,
-        host=config.settings.host,
-        port=config.settings.port
+        host=settings.host,
+        port=settings.port
     )

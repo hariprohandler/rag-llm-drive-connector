@@ -8,21 +8,31 @@ from alembic import context
 # Import models and Base for autogenerate support
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from pathlib import Path
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# Load .env file if it exists
+from dotenv import load_dotenv
+env_path = project_root / ".env"
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 # Set a dummy OPENAI_API_KEY if not set (for migrations only)
 if "OPENAI_API_KEY" not in os.environ:
     os.environ["OPENAI_API_KEY"] = "dummy-for-migrations"
 
-from models import Base
-import config as app_config
+from app.models import Base
+from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the database URL from our config
-database_url = app_config.settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
+# Set the database URL from our config (uses .env via pydantic-settings)
+database_url = settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
