@@ -180,13 +180,17 @@ async def send_chat_message(
         )
 
         # Get assistant response
+        # Always use the request's use_rag value if provided, otherwise fall back to conversation's setting
+        # This allows users to switch between "Ask" and "File Query" within the same conversation
+        use_rag = request.use_rag if request.use_rag is not None else (conversation.use_rag if request.conversation_id else False)
+        
         result = ask_question(
             query=request.content,
             user_id=current_user.id,
             db=db,
             request=fastapi_request,
             llm_config_id=conversation.llm_config_id or request.llm_config_id,
-            use_rag=conversation.use_rag if request.conversation_id else request.use_rag,
+            use_rag=use_rag,
         )
 
         # Add assistant message
@@ -212,9 +216,17 @@ async def send_chat_message(
             "assistant_message": assistant_message.to_dict(),
             "sources": result.get("sources", []),
         }
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback
+        error_detail = str(e)
+        # Include traceback in logs for debugging
+        error_traceback = traceback.format_exc()
+        print(f"Error in chat message: {error_detail}")
+        print(f"Traceback: {error_traceback}")
         activity_logger.log_error(str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @router.get("/conversations/{conversation_id}/messages")

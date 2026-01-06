@@ -11,6 +11,7 @@ class LLMConfig(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    config_name = Column(String, nullable=True)  # User-friendly name for the configuration
     provider = Column(String, nullable=False)  # 'openai', 'gemini', 'anthropic', 'custom'
     api_key = Column(Text, nullable=False)  # Encrypted API key
     model_name = Column(String, nullable=True)  # Model name (e.g., 'gpt-4', 'claude-3-opus')
@@ -29,6 +30,7 @@ class LLMConfig(Base):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "config_name": self.config_name,
             "provider": self.provider,
             "model_name": self.model_name,
             "base_url": self.base_url,

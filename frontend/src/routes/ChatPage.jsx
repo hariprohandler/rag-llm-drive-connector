@@ -10,7 +10,7 @@ const ChatPage = () => {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [queryType, setQueryType] = useState("file"); // "ask" or "file"
+  const [queryType, setQueryType] = useState("ask"); // "ask" or "file"
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [llmConfigs, setLlmConfigs] = useState([]);
@@ -92,7 +92,7 @@ const ChatPage = () => {
   const createNewConversation = () => {
     setCurrentConversationId(null);
     setMessages([]);
-    setQueryType("file");
+    setQueryType("ask"); // Default to "Ask" for new conversations
     // Keep history visible - only hide when user explicitly clicks hide button
   };
 
@@ -662,7 +662,7 @@ const ChatPage = () => {
                   boxShadow: queryType === "file" ? "var(--shadow-sm)" : "none",
                 }}
               >
-                📄 File Query
+                📄 RAG Search
               </button>
             </div>
 
