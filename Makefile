@@ -76,6 +76,9 @@ docker-compose-logs: ## View docker-compose logs
 setup-db: ## Setup database
 	python setup_db.py
 
+migrate-user-settings: ## Run migration to add user_settings table
+	python migrations/add_user_settings_table.py
+
 migrate: ## Run database migrations (supports ENVIRONMENT variable)
 	@if [ -n "$$ENVIRONMENT" ]; then \
 		echo "Running migrations for environment: $$ENVIRONMENT"; \

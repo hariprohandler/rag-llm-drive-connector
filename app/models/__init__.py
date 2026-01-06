@@ -4,6 +4,7 @@ from app.models.user import User
 from app.models.llm_config import LLMConfig
 from app.models.knowledge_base import KnowledgeBase
 from app.models.chat import ChatConversation, ChatMessage
+from app.models.user_settings import UserSettings
 
 __all__ = [
     "Base",
@@ -12,5 +13,6 @@ __all__ = [
     "KnowledgeBase",
     "ChatConversation",
     "ChatMessage",
+    "UserSettings",
 ]
 

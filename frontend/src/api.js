@@ -24,8 +24,14 @@ export const api = {
     request("/api/chat/messages", { method: "POST", body: JSON.stringify(body) }),
   listLLMConfigs: () => request("/api/llm-configs"),
   createLLMConfig: (body) =>
-    request("/api/llm-configs", { method: "POST", body: JSON.stringify(body) })
-  // You can add update/delete configs and ingest endpoints as needed.
+    request("/api/llm-configs", { method: "POST", body: JSON.stringify(body) }),
+  updateLLMConfig: (configId, body) =>
+    request(`/api/llm-configs/${configId}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteLLMConfig: (configId) =>
+    request(`/api/llm-configs/${configId}`, { method: "DELETE" }),
+  getOrganizationSettings: () => request("/api/settings/organization"),
+  updateOrganizationSettings: (body) =>
+    request("/api/settings/organization", { method: "PUT", body: JSON.stringify(body) }),
 };
 
 

@@ -47,6 +47,7 @@ async def google_callback(
             httponly=True,
             secure=False,  # Set to True in production with HTTPS
             samesite="lax",
+            path="/",  # Ensure cookie is available for all paths
         )
         return response
     except Exception as e:
@@ -83,6 +84,7 @@ async def microsoft_callback(
             httponly=True,
             secure=False,  # Set to True in production with HTTPS
             samesite="lax",
+            path="/",  # Ensure cookie is available for all paths
         )
         return response
     except Exception as e:

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from app.core.config import settings
-from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes
+from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes
 
 # Initialize database
 from app.models.base import init_db
@@ -14,9 +14,16 @@ init_db()
 app = FastAPI(title="RAG LLM Drive Connector", version="1.0.0")
 
 # CORS middleware
+# Note: When allow_credentials=True, you cannot use allow_origins=["*"]
+# Must specify explicit origins
+frontend_url = settings.frontend_base_url
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
+    allow_origins=[
+        frontend_url,
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +36,7 @@ app.include_router(ingest_routes.router)
 app.include_router(llm_config_routes.router)
 app.include_router(kb_routes.router)
 app.include_router(chat_routes.router)
+app.include_router(settings_routes.router)
 
 
 @app.get("/")

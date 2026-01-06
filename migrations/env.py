@@ -31,6 +31,7 @@ from app.models.user import User
 from app.models.llm_config import LLMConfig
 from app.models.knowledge_base import KnowledgeBase
 from app.models.chat import ChatConversation, ChatMessage
+from app.models.user_settings import UserSettings
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides
