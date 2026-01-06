@@ -1,9 +1,17 @@
 # Override file for using local PostgreSQL and MongoDB instead of Docker containers
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d
+# This file prevents postgres and mongodb from starting when using local databases
 
-version: '3.8'
+version: '3.9'
 
 services:
+  # Disable postgres service - use local PostgreSQL instead
+  postgres:
+    profiles: ["never"]  # This profile is never activated, so the service won't start
+
+  # Disable mongodb service - use local MongoDB instead
+  mongodb:
+    profiles: ["never"]  # This profile is never activated, so the service won't start
   app:
     # Run the existing application entrypoint
     command: python app.py
