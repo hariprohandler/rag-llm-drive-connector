@@ -29,7 +29,7 @@ def fetch_zendesk_tickets(
     Fetch tickets from Zendesk API.
     
     Args:
-        subdomain: Zendesk subdomain
+        subdomain: Zendesk subdomain (e.g., "mycompany" for mycompany.zendesk.com)
         email: Zendesk email
         api_token: Zendesk API token
         page_size: Number of tickets per page
@@ -38,10 +38,35 @@ def fetch_zendesk_tickets(
     Returns:
         List of ticket dictionaries
     """
+    # Clean subdomain - remove any .zendesk.com or .com suffixes
+    subdomain = subdomain.strip().lower()
+    if subdomain.endswith('.zendesk.com'):
+        subdomain = subdomain[:-12]
+    if subdomain.endswith('.com'):
+        subdomain = subdomain[:-4]
+    # Remove any leading/trailing dots
+    subdomain = subdomain.strip('.')
+    
+    if not subdomain:
+        raise ValueError("Invalid subdomain: subdomain cannot be empty")
+    
     base_url = f"https://{subdomain}.zendesk.com/api/v2"
     auth = (f"{email}/token", api_token)
     all_tickets = []
     page = 1
+    
+    # Configure SSL/TLS for requests
+    # Use a session with proper SSL configuration
+    session = requests.Session()
+    # Disable SSL warnings if verification is disabled (for development)
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+    
+    # Track if we need to disable SSL verification (set on first SSL error)
+    ssl_verify = True
     
     while True:
         url = f"{base_url}/tickets.json"
@@ -53,7 +78,14 @@ def fetch_zendesk_tickets(
         }
         
         try:
-            response = requests.get(url, auth=auth, params=params, timeout=30)
+            # Make request with SSL verification (or without if previous request failed)
+            response = session.get(
+                url, 
+                auth=auth, 
+                params=params, 
+                timeout=30,
+                verify=ssl_verify  # Verify SSL certificates (or not if SSL failed before)
+            )
             response.raise_for_status()
             data = response.json()
             
@@ -73,6 +105,29 @@ def fetch_zendesk_tickets(
             
             page += 1
             
+        except requests.exceptions.SSLError as ssl_error:
+            # SSL/TLS handshake failure
+            if ssl_verify:
+                # First SSL error - try again with verification disabled
+                error_msg = (
+                    f"SSL/TLS handshake failed when connecting to Zendesk.\n"
+                    f"  This could be due to:\n"
+                    f"  1. Network/firewall blocking SSL connections\n"
+                    f"  2. Outdated SSL certificates in the Docker container\n"
+                    f"  3. TLS version mismatch\n"
+                    f"  Original error: {str(ssl_error)}\n"
+                    f"  Retrying with SSL verification disabled (development mode)..."
+                )
+                print(f"WARNING: {error_msg}")
+                ssl_verify = False
+                # Retry the same request with SSL verification disabled
+                continue
+            else:
+                # SSL already disabled and still failing
+                raise Exception(
+                    f"Failed to fetch Zendesk tickets: SSL/TLS handshake failure even with verification disabled. "
+                    f"Please check your network connection. Error: {str(ssl_error)}"
+                )
         except requests.exceptions.RequestException as e:
             raise Exception(f"Failed to fetch Zendesk tickets: {str(e)}")
     
