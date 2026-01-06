@@ -2,16 +2,19 @@
 # Usage: docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d
 # This file prevents postgres and mongodb from starting when using local databases
 
-version: '3.9'
+version: '3.8'
 
 services:
-  # Disable postgres service - use local PostgreSQL instead
+  # Prevent postgres from starting - use local PostgreSQL instead
   postgres:
-    profiles: ["never"]  # This profile is never activated, so the service won't start
+    deploy:
+      replicas: 0
 
-  # Disable mongodb service - use local MongoDB instead
+  # Prevent mongodb from starting - use local MongoDB instead
   mongodb:
-    profiles: ["never"]  # This profile is never activated, so the service won't start
+    deploy:
+      replicas: 0
+
   app:
     # Run the existing application entrypoint
     command: python app.py
@@ -19,25 +22,16 @@ services:
     volumes:
       - .:/app
       - ./data:/app/data:ro
+    env_file:
+      - .env.development
     environment:
       # Override to use local databases via host.docker.internal
       # On Linux, you may need to use network_mode: host instead
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       - MONGODB_URL=mongodb://host.docker.internal:${MONGODB_PORT:-27017}
-      # Pass through all other environment variables from .env.development
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
-      - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
-      - MICROSOFT_CLIENT_SECRET=${MICROSOFT_CLIENT_SECRET:-}
-      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-}
-      - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-http://localhost:8000/auth/onedrive/callback}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
-      - ENVIRONMENT=${ENVIRONMENT:-development}
-    # Remove dependencies on postgres and mongodb since we're using local databases
-    depends_on: []
+      # All other environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
+      # are loaded from .env.development via env_file above
+    # Note: depends_on from base file remains, but postgres/mongodb won't start due to replicas: 0
     # For Linux, uncomment the line below if host.docker.internal doesn't work:
     # network_mode: host
     # And change DATABASE_URL/MONGODB_URL to use localhost instead of host.docker.internal
@@ -47,8 +41,11 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    env_file:
+      - .env.development
     environment:
-      - VITE_BACKEND_BASE_URL=http://localhost:8000
+      # Vite environment variables (must be prefixed with VITE_)
+      - VITE_BACKEND_BASE_URL=${VITE_BACKEND_BASE_URL:-http://localhost:8000}
     # Frontend depends on app service
     depends_on:
       - app

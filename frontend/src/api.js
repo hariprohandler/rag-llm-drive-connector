@@ -1,4 +1,5 @@
-export const BACKEND_BASE_URL = "http://localhost:8000";
+// Get backend URL from environment variable (Vite uses import.meta.env)
+export const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
 
 async function request(path, options = {}) {
   const res = await fetch(`${BACKEND_BASE_URL}${path}`, {
