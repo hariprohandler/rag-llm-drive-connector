@@ -29,10 +29,10 @@ async def get_organization_settings(
     user_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
     
     if user_settings:
-        return {"organization_name": user_settings.organization_name or "RAG Chat Platform"}
+        return {"organization_name": user_settings.organization_name or "Anukara"}
     
     # Return default if no settings exist
-    return {"organization_name": "RAG Chat Platform"}
+    return {"organization_name": "Anukara"}
 
 
 @router.put("/organization")
