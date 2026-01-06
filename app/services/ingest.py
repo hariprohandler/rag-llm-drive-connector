@@ -230,35 +230,48 @@ def ingest_local_files(
     success = ingest_documents(all_documents, collection_name, metadata)
     
     # Create knowledge base entry if db provided
+    # IMPORTANT: Create KB even if ingestion failed, so we can track what was attempted
     kb_id = None
-    if db and success:
-        # Build knowledge base name with duplicate indicator if needed
-        duplicate_note = ""
-        if duplicate_files:
-            duplicate_note = f" ({len(duplicate_files)} duplicate file(s): {', '.join(duplicate_files[:3])}{'...' if len(duplicate_files) > 3 else ''})"
-        
-        kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files){duplicate_note}"
-        # Sanitize file paths - remove NUL characters and other problematic characters
-        sanitized_paths = [path.replace('\x00', '') for path in file_paths]
-        # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
-        kb = KnowledgeBase(
-            user_id=user_id,
-            name=kb_name,
-            source_type="local_file",
-            source_id="local_files",  # Use a simple identifier instead of file paths
-            extra_metadata={
-                "files": file_metadata, 
-                "file_paths": sanitized_paths,
-                "has_duplicates": len(duplicate_files) > 0,
-                "duplicate_files": duplicate_files
-            },
-            document_count=len(all_documents),
-            is_active=True
-        )
-        db.add(kb)
-        db.commit()
-        db.refresh(kb)
-        kb_id = kb.id
+    if db:
+        try:
+            # Build knowledge base name with duplicate indicator if needed
+            duplicate_note = ""
+            if duplicate_files:
+                duplicate_note = f" ({len(duplicate_files)} duplicate file(s): {', '.join(duplicate_files[:3])}{'...' if len(duplicate_files) > 3 else ''})"
+            
+            kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files){duplicate_note}"
+            # Sanitize file paths - remove NUL characters and other problematic characters
+            sanitized_paths = [path.replace('\x00', '') for path in file_paths]
+            # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
+            kb = KnowledgeBase(
+                user_id=user_id,
+                name=kb_name,
+                source_type="local_file",
+                source_id="local_files",  # Use a simple identifier instead of file paths
+                extra_metadata={
+                    "files": file_metadata, 
+                    "file_paths": sanitized_paths,
+                    "has_duplicates": len(duplicate_files) > 0,
+                    "duplicate_files": duplicate_files,
+                    "ingestion_success": success
+                },
+                document_count=len(all_documents),
+                is_active=True
+            )
+            db.add(kb)
+            db.flush()  # Flush to get the ID without committing
+            kb_id = kb.id
+            db.commit()  # Now commit
+            db.refresh(kb)  # Refresh to ensure we have the latest state
+            print(f"Successfully created knowledge base with ID: {kb_id} for user: {user_id}, name: {kb_name}")
+        except Exception as e:
+            print(f"ERROR creating knowledge base entry: {e}")
+            import traceback
+            traceback.print_exc()
+            db.rollback()
+            # Don't fail the whole ingestion if KB creation fails
+            # The documents are already in the vector DB if success=True
+            # But we should still return the kb_id as None so the caller knows
     
     return success, kb_id
 

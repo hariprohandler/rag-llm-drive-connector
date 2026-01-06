@@ -10,6 +10,7 @@ import config
 from app.models import User
 from app.services.auth_service import get_or_create_user, create_access_token
 from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
+from app.services.email_encryption import decrypt_email
 from app.middleware.tracing import get_tracing_id
 import secrets
 
@@ -144,8 +145,9 @@ def handle_google_callback(code: str, state: str, db: Session, request: Optional
             request=request
         )
         
-        # Create JWT token
-        access_token = create_access_token(data={"sub": user.id, "email": user.email}, request=request)
+        # Create JWT token (use decrypted email for consistency)
+        decrypted_email = decrypt_email(user.email)
+        access_token = create_access_token(data={"sub": user.id, "email": decrypted_email}, request=request)
         
         # Log successful OAuth callback
         logger.log_auth_activity(
@@ -322,8 +324,9 @@ def handle_microsoft_callback(code: str, state: str, db: Session, request: Optio
             request=request
         )
         
-        # Create JWT token
-        jwt_token = create_access_token(data={"sub": user.id, "email": user.email}, request=request)
+        # Create JWT token (use decrypted email for consistency)
+        decrypted_email = decrypt_email(user.email)
+        jwt_token = create_access_token(data={"sub": user.id, "email": decrypted_email}, request=request)
         
         # Log successful OAuth callback
         logger.log_auth_activity(

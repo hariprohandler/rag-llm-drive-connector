@@ -9,7 +9,8 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(String, primary_key=True)  # User ID (email or OAuth ID)
-    email = Column(String, unique=True, nullable=False, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)  # Encrypted email
+    email_hash = Column(String, unique=True, nullable=True, index=True)  # Hash for lookups (deterministic)
     name = Column(String, nullable=True)
     provider = Column(String, nullable=False)  # 'google' or 'microsoft'
     provider_id = Column(String, nullable=False, index=True)  # OAuth provider user ID
@@ -18,10 +19,23 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    def to_dict(self):
+    def to_dict(self, decrypt_email_field: bool = True):
+        """
+        Convert user to dictionary.
+        
+        Args:
+            decrypt_email_field: If True, decrypt email before returning (default: True)
+        """
+        email_value = self.email
+        if decrypt_email_field and self.email:
+            # Always attempt to decrypt - decrypt_email handles both encrypted and plain text emails
+            # It will return plain text if already decrypted, or decrypt if encrypted
+            from app.services.email_encryption import decrypt_email
+            email_value = decrypt_email(self.email)
+        
         return {
             "id": self.id,
-            "email": self.email,
+            "email": email_value,
             "name": self.name,
             "provider": self.provider,
             "picture": self.picture,
