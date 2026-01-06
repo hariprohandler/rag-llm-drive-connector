@@ -156,13 +156,21 @@ def get_qa_chain(
         vectorstore = get_vectorstore(collection_name)
         
         # Build filter based on source_filter
-        # With JSONB metadata, use $eq operator for equality filters
+        # With JSONB metadata, use simple equality for filters (no $eq operator needed)
         # For "document" filter (not zendesk), we'll filter after retrieval
-        search_kwargs = {"k": settings.retrieval_k * 2 if source_filter == "document" else settings.retrieval_k}
         if source_filter == "zendesk":
-            # Filter for zendesk only - use $eq operator for JSONB
-            search_kwargs["filter"] = {"$eq": {"source": "zendesk"}}
-        # For "document" or "all", we'll handle filtering in ask_question after retrieval
+            # Increase retrieval for Zendesk to get more context (e.g., for "how many tickets" questions)
+            # This ensures the LLM has access to more relevant Zendesk tickets for comprehensive answers
+            search_kwargs = {
+                "k": settings.retrieval_k * 5,  # Get 5x more documents (20 instead of 4) for better context
+                "filter": {"source": "zendesk"}
+            }
+        elif source_filter == "document":
+            search_kwargs = {"k": settings.retrieval_k * 2}
+        else:
+            # For "all" sources, use default retrieval_k
+            search_kwargs = {"k": settings.retrieval_k}
+        # For "document" filter, we'll handle filtering in ask_question after retrieval
         
         retriever = vectorstore.as_retriever(
             search_type="similarity",
