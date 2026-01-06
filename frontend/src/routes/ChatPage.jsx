@@ -12,6 +12,9 @@ const ChatPage = () => {
   const [error, setError] = useState(null);
   const [queryType, setQueryType] = useState("ask"); // "ask" or "file"
   const [sourceFilter, setSourceFilter] = useState("all"); // "all", "document", "zendesk"
+  const [databaseConnections, setDatabaseConnections] = useState([]);
+  const [selectedDatabaseId, setSelectedDatabaseId] = useState(null);
+  const [loadingDatabases, setLoadingDatabases] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [llmConfigs, setLlmConfigs] = useState([]);
@@ -27,6 +30,7 @@ const ChatPage = () => {
   useEffect(() => {
     loadConversations();
     loadLLMConfigs();
+    loadDatabaseConnections();
   }, []);
 
   // Load messages when conversation changes
@@ -64,6 +68,25 @@ const ChatPage = () => {
     }
   };
 
+  const loadDatabaseConnections = async () => {
+    try {
+      setLoadingDatabases(true);
+      const connections = await api.listDatabaseConnections();
+      setDatabaseConnections(connections || []);
+      // Set default database (first active connection)
+      if (connections && connections.length > 0) {
+        const activeConnection = connections.find(c => c.is_active) || connections[0];
+        if (activeConnection) {
+          setSelectedDatabaseId(activeConnection.id);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading database connections:", e);
+    } finally {
+      setLoadingDatabases(false);
+    }
+  };
+
   const loadConversationMessages = async (conversationId) => {
     try {
       const conversation = await api.getConversation(conversationId);
@@ -94,6 +117,13 @@ const ChatPage = () => {
     setCurrentConversationId(null);
     setMessages([]);
     setQueryType("ask"); // Default to "Ask" for new conversations
+    // Reset database selection to default (first active connection)
+    if (databaseConnections.length > 0) {
+      const activeConnection = databaseConnections.find(c => c.is_active) || databaseConnections[0];
+      if (activeConnection) {
+        setSelectedDatabaseId(activeConnection.id);
+      }
+    }
     // Keep history visible - only hide when user explicitly clicks hide button
   };
 
@@ -161,6 +191,7 @@ const ChatPage = () => {
           use_rag: queryType === "file",
           llm_config_id: selectedLlmId,
           source_filter: queryType === "file" ? sourceFilter : null,
+          database_connection_id: selectedDatabaseId || null,
         },
         (data) => {
           // Handle streaming data
@@ -857,6 +888,58 @@ const ChatPage = () => {
                   <span>🎫</span>
                   <span>Zendesk</span>
                 </button>
+              </div>
+            )}
+
+            {/* Database Connection Selector - Show when databases are available */}
+            {databaseConnections.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-sm)",
+                  padding: "4px",
+                  background: "var(--gray-100)",
+                  borderRadius: "var(--radius-md)",
+                  width: "fit-content",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                    whiteSpace: "nowrap",
+                    paddingLeft: "var(--spacing-xs)",
+                  }}
+                >
+                  Database:
+                </label>
+                <select
+                  value={selectedDatabaseId || ""}
+                  onChange={(e) => setSelectedDatabaseId(e.target.value ? parseInt(e.target.value) : null)}
+                  style={{
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "1px solid var(--gray-300)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--background)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                    minWidth: "200px",
+                  }}
+                  title="Select database for SQL queries"
+                >
+                  <option value="">Auto-detect</option>
+                  {databaseConnections
+                    .filter((conn) => conn.is_active)
+                    .map((conn) => (
+                      <option key={conn.id} value={conn.id}>
+                        {conn.db_type === "postgresql" ? "🐘" : conn.db_type === "mysql" ? "🐬" : "💾"} {conn.name} ({conn.db_type.toUpperCase()})
+                      </option>
+                    ))}
+                </select>
               </div>
             )}
 

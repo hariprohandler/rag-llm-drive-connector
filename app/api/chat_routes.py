@@ -31,6 +31,7 @@ class ChatMessageRequest(BaseModel):
     use_rag: bool = True
     llm_config_id: Optional[int] = None
     source_filter: Optional[str] = None  # 'all', 'document', 'zendesk'
+    database_connection_id: Optional[int] = None  # Database connection to use for SQL queries
 
 
 class ConversationRequest(BaseModel):
@@ -160,6 +161,8 @@ async def stream_chat_response(
     from app.services.rag_streaming import stream_question
     
     # Check if this is a SQL query and we have a database connection
+    # If database_connection_id is provided, use it (user explicitly selected a database)
+    # Only use SQL if the query looks like a SQL query
     if database_connection_id and is_sql_query(query):
         # Handle SQL query with streaming
         activity_logger = None
@@ -333,16 +336,28 @@ async def send_chat_message(
         should_use_sql = False
         database_connection_id = None
         
-        if is_sql_query(request.content):
-            # Check if user has active database connections
+        # Use provided database_connection_id if available, otherwise auto-detect
+        if request.database_connection_id:
+            # Validate that the provided connection belongs to the user
+            db_conn = db.query(DatabaseConnection).filter(
+                DatabaseConnection.id == request.database_connection_id,
+                DatabaseConnection.user_id == current_user.id,
+                DatabaseConnection.is_active == True
+            ).first()
+            if db_conn:
+                database_connection_id = request.database_connection_id
+                # If user explicitly selected a database, use it for SQL queries
+                # Check if query looks like SQL query (user selected DB, so likely wants SQL)
+                should_use_sql = is_sql_query(request.content)
+        elif is_sql_query(request.content):
+            # Auto-detect: Check if user has active database connections
             db_connections = db.query(DatabaseConnection).filter(
                 DatabaseConnection.user_id == current_user.id,
                 DatabaseConnection.is_active == True
             ).all()
             
             if db_connections:
-                # Use the first active connection (could be enhanced to select based on context)
-                # For now, we'll use the first one or allow user to specify
+                # Use the first active connection if user didn't specify
                 database_connection_id = db_connections[0].id
                 should_use_sql = True
 
@@ -438,7 +453,7 @@ async def send_chat_message(
                     llm_config_id=conversation.llm_config_id or request.llm_config_id,
                     use_rag=request.use_rag if request.use_rag is not None else (conversation.use_rag if request.conversation_id else False),
                     source_filter=request.source_filter,
-                    database_connection_id=database_connection_id if should_use_sql else None,
+                    database_connection_id=request.database_connection_id or (database_connection_id if should_use_sql else None),
                 ):
                     # Parse SSE format: "data: {...}\n\n"
                     try:
