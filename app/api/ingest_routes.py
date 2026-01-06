@@ -122,6 +122,15 @@ async def upload_files(
                 knowledge_base_name=knowledge_base_name,
             )
 
+            # Verify knowledge base was created if kb_id is returned
+            if kb_id:
+                from app.models import KnowledgeBase
+                kb_verify = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+                if not kb_verify:
+                    print(f"WARNING: Knowledge base ID {kb_id} was returned but not found in database after commit!")
+                else:
+                    print(f"Verified: Knowledge base ID {kb_id} exists in database for user {current_user.id}")
+
             response_time_ms = (time.time() - start_time) * 1000
             
             if success:

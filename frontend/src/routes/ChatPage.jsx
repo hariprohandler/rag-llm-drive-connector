@@ -17,8 +17,10 @@ const ChatPage = () => {
   const [selectedLlmId, setSelectedLlmId] = useState(null);
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [showHistory, setShowHistory] = useState(true);
+  const [showLLMDropdown, setShowLLMDropdown] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const llmDropdownRef = useRef(null);
 
   // Load conversations and LLM configs on mount
   useEffect(() => {
@@ -91,12 +93,12 @@ const ChatPage = () => {
     setCurrentConversationId(null);
     setMessages([]);
     setQueryType("file");
-    setShowHistory(false);
+    // Keep history visible - only hide when user explicitly clicks hide button
   };
 
   const selectConversation = async (conversationId) => {
     setCurrentConversationId(conversationId);
-    setShowHistory(false);
+    // Keep history visible - only hide when user explicitly clicks hide button
   };
 
   const deleteConversation = async (conversationId, e) => {
@@ -224,9 +226,9 @@ const ChatPage = () => {
   };
 
   const getLLMDisplayName = (llmId) => {
-    if (!llmId) return "Default";
+    if (!llmId) return "Default (System)";
     const config = llmConfigs.find(c => c.id === llmId);
-    if (!config) return "Default";
+    if (!config) return "Default (System)";
     const providerNames = {
       openai: "OpenAI",
       gemini: "Gemini",
@@ -235,6 +237,30 @@ const ChatPage = () => {
     };
     return `${providerNames[config.provider] || config.provider} - ${config.model_name || "default"}`;
   };
+
+  const getLLMProviderIcon = (provider) => {
+    switch (provider) {
+      case "openai": return "🤖";
+      case "gemini": return "💎";
+      case "anthropic": return "🧠";
+      case "custom": return "⚙️";
+      default: return "🔧";
+    }
+  };
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (llmDropdownRef.current && !llmDropdownRef.current.contains(event.target)) {
+        setShowLLMDropdown(false);
+      }
+    };
+
+    if (showLLMDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showLLMDropdown]);
 
   return (
     <div className="page-enter" style={{ display: "flex", gap: "var(--spacing-lg)", height: "calc(100vh - 4rem)", maxHeight: "800px" }}>
@@ -640,8 +666,16 @@ const ChatPage = () => {
               </button>
             </div>
 
-            {/* LLM Model Selector */}
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)" }}>
+            {/* LLM Model Selector - Custom Dropdown */}
+            <div 
+              ref={llmDropdownRef}
+              style={{ 
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                gap: "var(--spacing-sm)"
+              }}
+            >
               <label
                 style={{
                   fontSize: "0.875rem",
@@ -652,33 +686,231 @@ const ChatPage = () => {
               >
                 LLM:
               </label>
-              <select
-                value={selectedLlmId || ""}
-                onChange={(e) => setSelectedLlmId(e.target.value ? parseInt(e.target.value) : null)}
-                className="input"
-                style={{
-                  padding: "var(--spacing-xs) var(--spacing-md)",
-                  fontSize: "0.875rem",
-                  border: "1px solid var(--gray-300)",
-                  borderRadius: "var(--radius-md)",
-                  background: "var(--bg-primary)",
-                  color: "var(--text-primary)",
-                  cursor: "pointer",
-                  minWidth: "200px",
-                }}
-              >
-                <option value="">Default (System)</option>
-                {llmConfigs.map((config) => (
-                  <option key={config.id} value={config.id}>
-                    {config.is_default ? "⭐ " : ""}
-                    {config.provider === "openai" ? "OpenAI" : 
-                     config.provider === "gemini" ? "Gemini" :
-                     config.provider === "anthropic" ? "Claude" :
-                     config.provider === "custom" ? "Custom" : config.provider} - {config.model_name || "default"}
-                    {!config.is_active ? " (Inactive)" : ""}
-                  </option>
-                ))}
-              </select>
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowLLMDropdown(!showLLMDropdown)}
+                  className="hover-lift"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--spacing-sm)",
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "1px solid var(--gray-300)",
+                    borderRadius: "var(--radius-md)",
+                    background: "var(--bg-primary)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                    minWidth: "220px",
+                    justifyContent: "space-between",
+                    transition: "all var(--transition-base)",
+                    boxShadow: showLLMDropdown ? "var(--shadow-lg)" : "var(--shadow-sm)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", flex: 1 }}>
+                    {selectedLlmId ? (
+                      <>
+                        <span style={{ fontSize: "1rem" }}>
+                          {getLLMProviderIcon(llmConfigs.find(c => c.id === selectedLlmId)?.provider || "")}
+                        </span>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {getLLMDisplayName(selectedLlmId)}
+                        </span>
+                        {llmConfigs.find(c => c.id === selectedLlmId)?.is_default && (
+                          <span style={{ fontSize: "0.75rem" }}>⭐</span>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ fontSize: "1rem" }}>🔧</span>
+                        <span>Default (System)</span>
+                      </>
+                    )}
+                  </div>
+                  <span style={{ 
+                    fontSize: "0.75rem",
+                    transition: "transform var(--transition-base)",
+                    transform: showLLMDropdown ? "rotate(180deg)" : "rotate(0deg)"
+                  }}>
+                    ▼
+                  </span>
+                </button>
+
+                {/* Dropdown Menu */}
+                {showLLMDropdown && (
+                  <div
+                    className="fade-in-down"
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      marginTop: "var(--spacing-xs)",
+                      background: "var(--bg-primary)",
+                      border: "1px solid var(--gray-300)",
+                      borderRadius: "var(--radius-md)",
+                      boxShadow: "var(--shadow-lg)",
+                      zIndex: 1000,
+                      maxHeight: "300px",
+                      overflowY: "auto",
+                      minWidth: "280px",
+                    }}
+                  >
+                    {/* Default Option */}
+                    <div
+                      onClick={() => {
+                        setSelectedLlmId(null);
+                        setShowLLMDropdown(false);
+                      }}
+                      className="hover-lift"
+                      style={{
+                        padding: "var(--spacing-sm) var(--spacing-md)",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--spacing-sm)",
+                        background: selectedLlmId === null ? "var(--primary-light)" : "transparent",
+                        borderLeft: selectedLlmId === null ? "3px solid var(--primary)" : "3px solid transparent",
+                        transition: "all var(--transition-base)",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedLlmId !== null) {
+                          e.currentTarget.style.background = "var(--gray-50)";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedLlmId !== null) {
+                          e.currentTarget.style.background = "transparent";
+                        }
+                      }}
+                    >
+                      <span style={{ fontSize: "1rem" }}>🔧</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 500, fontSize: "0.875rem" }}>Default (System)</div>
+                        <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>Use system default LLM</div>
+                      </div>
+                      {selectedLlmId === null && (
+                        <span style={{ color: "var(--primary)", fontSize: "0.875rem" }}>✓</span>
+                      )}
+                    </div>
+
+                    {/* Divider */}
+                    {llmConfigs.length > 0 && (
+                      <div style={{ 
+                        height: "1px", 
+                        background: "var(--gray-200)", 
+                        margin: "var(--spacing-xs) 0" 
+                      }} />
+                    )}
+
+                    {/* LLM Config Options */}
+                    {llmConfigs.map((config) => {
+                      const isSelected = selectedLlmId === config.id;
+                      const providerName = config.provider === "openai" ? "OpenAI" : 
+                                         config.provider === "gemini" ? "Gemini" :
+                                         config.provider === "anthropic" ? "Claude" :
+                                         config.provider === "custom" ? "Custom" : config.provider;
+                      
+                      return (
+                        <div
+                          key={config.id}
+                          onClick={() => {
+                            setSelectedLlmId(config.id);
+                            setShowLLMDropdown(false);
+                          }}
+                          className="hover-lift"
+                          style={{
+                            padding: "var(--spacing-sm) var(--spacing-md)",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "var(--spacing-sm)",
+                            background: isSelected ? "var(--primary-light)" : "transparent",
+                            borderLeft: isSelected ? "3px solid var(--primary)" : "3px solid transparent",
+                            transition: "all var(--transition-base)",
+                            opacity: config.is_active ? 1 : 0.6,
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!isSelected) {
+                              e.currentTarget.style.background = "var(--gray-50)";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isSelected) {
+                              e.currentTarget.style.background = "transparent";
+                            }
+                          }}
+                        >
+                          <span style={{ fontSize: "1.25rem" }}>
+                            {getLLMProviderIcon(config.provider)}
+                          </span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: "var(--spacing-xs)",
+                              fontWeight: 500,
+                              fontSize: "0.875rem"
+                            }}>
+                              <span>{providerName}</span>
+                              {config.is_default && (
+                                <span style={{ 
+                                  fontSize: "0.75rem",
+                                  padding: "2px var(--spacing-xs)",
+                                  background: "var(--warning-light)",
+                                  color: "var(--warning-dark)",
+                                  borderRadius: "var(--radius-sm)",
+                                  fontWeight: 600
+                                }}>
+                                  ⭐ Default
+                                </span>
+                              )}
+                              {!config.is_active && (
+                                <span style={{ 
+                                  fontSize: "0.75rem",
+                                  padding: "2px var(--spacing-xs)",
+                                  background: "var(--gray-200)",
+                                  color: "var(--text-secondary)",
+                                  borderRadius: "var(--radius-sm)",
+                                  fontWeight: 500
+                                }}>
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ 
+                              fontSize: "0.75rem", 
+                              color: "var(--text-secondary)",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap"
+                            }}>
+                              {config.model_name || "default"}
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <span style={{ color: "var(--primary)", fontSize: "0.875rem" }}>✓</span>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Empty State */}
+                    {llmConfigs.length === 0 && (
+                      <div style={{ 
+                        padding: "var(--spacing-lg)", 
+                        textAlign: "center",
+                        color: "var(--text-secondary)",
+                        fontSize: "0.875rem"
+                      }}>
+                        No LLM configurations available
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
