@@ -6,6 +6,7 @@ from app.models.knowledge_base import KnowledgeBase
 from app.models.chat import ChatConversation, ChatMessage
 from app.models.user_settings import UserSettings
 from app.models.oauth_credentials import OAuthCredentials
+from app.models.tool_config import ToolConfig
 
 __all__ = [
     "Base",
@@ -16,5 +17,6 @@ __all__ = [
     "ChatMessage",
     "UserSettings",
     "OAuthCredentials",
+    "ToolConfig",
 ]
 

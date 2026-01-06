@@ -507,3 +507,9 @@ html {
 .bounce {
   animation: bounce 1s infinite;
 }
+
+/* Blink Animation for Streaming Cursor */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}

@@ -4,7 +4,7 @@ try:
 except ImportError:
     from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores.pgvector import PGVector
+from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
@@ -95,14 +95,50 @@ def ingest_documents(
             chunk.metadata = sanitized_metadata
     
     # Create embeddings and store in PgVector
-    embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
-    
-    PGVector.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name=collection_name,
-        connection_string=settings.database_url,
+    # Use batch processing for faster embedding generation
+    embeddings = OpenAIEmbeddings(
+        openai_api_key=settings.openai_api_key,
+        chunk_size=100,  # Process embeddings in batches of 100
+        max_retries=3,
+        request_timeout=60.0
     )
+    
+    # Use add_documents with batch processing for better performance
+    # Check if collection exists, if not create it
+    vectorstore = PGVector(
+        collection_name=collection_name,
+        connection=settings.database_url,
+        embeddings=embeddings,
+        use_jsonb=True,  # Use JSONB for metadata as recommended
+    )
+    
+    # Add documents in batches to avoid memory issues and improve performance
+    # Batch size of 100-200 is optimal for embedding generation
+    # Larger batches = fewer API calls = faster processing
+    batch_size = 200  # Increased batch size for better performance
+    total_batches = (len(chunks) + batch_size - 1) // batch_size
+    
+    # Use add_documents which handles batching internally for embeddings
+    # This is more efficient than manual batching
+    try:
+        # Try adding all documents at once (PGVector handles batching internally)
+        vectorstore.add_documents(chunks)
+    except Exception as e:
+        print(f"Error adding all documents at once, falling back to batches: {e}")
+        # Fallback to manual batching if needed
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            try:
+                vectorstore.add_documents(batch)
+            except Exception as batch_error:
+                print(f"Error adding batch {i//batch_size + 1}/{total_batches}: {batch_error}")
+                # Try adding documents one by one if batch fails
+                for chunk in batch:
+                    try:
+                        vectorstore.add_documents([chunk])
+                    except Exception as chunk_error:
+                        print(f"Error adding individual chunk: {chunk_error}")
+                        continue
     
     return True
 
@@ -168,6 +204,8 @@ def ingest_local_files(
             else:
                 continue
                 
+            # Load documents - this can be slow for large files
+            # Consider adding progress callback here if needed
             docs = loader.load()
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
             # Sanitize file path for metadata storage

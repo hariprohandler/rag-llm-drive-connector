@@ -2,6 +2,7 @@
 from typing import Dict, Any, Optional
 from datetime import datetime
 import uuid
+import os
 from enum import Enum
 import threading
 from sqlalchemy.orm import Session
@@ -109,6 +110,22 @@ def get_task(task_id: str) -> Optional[IngestionTask]:
         return _task_store.get(task_id)
 
 
+def create_file_upload_task(
+    user_id: str,
+    file_paths: list[str],
+    knowledge_base_name: Optional[str] = None
+) -> IngestionTask:
+    """Create a new file upload ingestion task."""
+    task_id = str(uuid.uuid4())
+    items = [{"id": path, "name": os.path.basename(path), "type": "file", "path": path} for path in file_paths]
+    task = IngestionTask(task_id, user_id, "local", items, knowledge_base_name)
+    
+    with _task_store_lock:
+        _task_store[task_id] = task
+    
+    return task
+
+
 def run_ingestion_task(task: IngestionTask):
     """Run ingestion task in background."""
     task.set_status(TaskStatus.RUNNING, "Starting ingestion...")
@@ -117,7 +134,30 @@ def run_ingestion_task(task: IngestionTask):
         # Get database session
         db = next(get_db())
         
-        if task.provider == "google":
+        if task.provider == "local":
+            # Process local file uploads
+            from app.services.ingest import ingest_local_files
+            
+            file_paths = [item.get("path") or item.get("id") for item in task.items]
+            
+            # Process files with progress updates
+            for idx, file_path in enumerate(file_paths):
+                task.update_progress(idx, f"Processing file: {os.path.basename(file_path)}")
+            
+            success, kb_id = ingest_local_files(
+                file_paths=file_paths,
+                user_id=task.user_id,
+                db=db,
+                knowledge_base_name=task.knowledge_base_name
+            )
+            
+            if success and kb_id:
+                task.knowledge_base_id = kb_id
+            
+            task.update_progress(task.total_items, "Ingestion completed!")
+            task.set_status(TaskStatus.COMPLETED, "All files ingested successfully")
+            
+        elif task.provider == "google":
             # Get Google credentials
             credentials = get_google_credentials(db, task.user_id)
             if not credentials:

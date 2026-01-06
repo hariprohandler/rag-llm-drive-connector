@@ -54,8 +54,57 @@ async function request(path, options = {}) {
 
 export const api = {
   me: () => request("/auth/me"),
-  sendChatMessage: (body) =>
-    request("/api/chat/messages", { method: "POST", body: JSON.stringify(body) }),
+  sendChatMessage: async (body, onStream) => {
+    // Check if streaming is requested (default: true)
+    const stream = body.stream !== false;
+    const url = `${BACKEND_BASE_URL}/api/chat/messages${stream ? '?stream=true' : ''}`;
+    
+    if (stream && onStream) {
+      // Use EventSource for Server-Sent Events
+      const response = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Tracing-Id": getTracingId(),
+        },
+        body: JSON.stringify({ ...body, stream: undefined }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Request failed");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onStream(data);
+            } catch (e) {
+              console.error("Error parsing SSE data:", e);
+            }
+          }
+        }
+      }
+      return {}; // Streaming handled via callbacks
+    } else {
+      // Non-streaming fallback
+      return request("/api/chat/messages", { method: "POST", body: JSON.stringify(body) });
+    }
+  },
   listLLMConfigs: (includeInactive = true) => request(`/api/llm-configs?include_inactive=${includeInactive}`),
   createLLMConfig: (body) =>
     request("/api/llm-configs", { method: "POST", body: JSON.stringify(body) }),
@@ -93,8 +142,14 @@ export const api = {
     request("/api/drive/ingest/google", { method: "POST", body: JSON.stringify(body) }),
   startMicrosoftIngestion: (body) =>
     request("/api/drive/ingest/microsoft", { method: "POST", body: JSON.stringify(body) }),
-  getIngestionTaskStatus: (taskId) =>
-    request(`/api/drive/task/${taskId}`),
+  getIngestionTaskStatus: async (taskId) => {
+    try {
+      return await request(`/api/drive/task/${taskId}`);
+    } catch (e) {
+      // Fallback to ingest task endpoint for file uploads
+      return await request(`/api/ingest/task/${taskId}`);
+    }
+  },
   listLocalFiles: () => request("/api/knowledge-bases/local/files"),
   // Chat conversations
   listConversations: () => request("/api/chat/conversations"),
@@ -105,6 +160,14 @@ export const api = {
   listKnowledgeBases: () => request("/api/knowledge-bases"),
   getKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`),
   deleteKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`, { method: "DELETE" }),
+  // Tools integration
+  listTools: () => request("/api/tools"),
+  getToolConfig: (toolName) => request(`/api/tools/${toolName}`),
+  createToolConfig: (body) => request("/api/tools", { method: "POST", body: JSON.stringify(body) }),
+  updateToolConfig: (toolName, body) => request(`/api/tools/${toolName}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteToolConfig: (toolName) => request(`/api/tools/${toolName}`, { method: "DELETE" }),
+  syncTool: (body) => request("/api/tools/sync", { method: "POST", body: JSON.stringify(body) }),
+  getSyncStatus: (taskId) => request(`/api/tools/sync/${taskId}`),
 };
 
 

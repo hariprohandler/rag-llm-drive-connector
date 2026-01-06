@@ -9,23 +9,46 @@ import base64
 
 
 def get_encryption_key() -> bytes:
-    """Get or generate encryption key for API keys."""
+    """
+    Get or generate encryption key for API keys.
+    
+    Fernet keys are 32 bytes, base64-encoded. This function ensures the key
+    is in the correct format for Fernet.
+    """
     key = settings.encryption_key or os.getenv("ENCRYPTION_KEY")
     if not key:
         # In production, this should be set as env var
         # For development, generate a key and store it
         key = Fernet.generate_key()
-        print(f"WARNING: Generated encryption key. Set ENCRYPTION_KEY={key.decode()} in production!")
+        key_str = key.decode()
+        print(f"WARNING: Generated encryption key. Set ENCRYPTION_KEY={key_str} in production!")
+        print(f"WARNING: Using a new key means existing encrypted data cannot be decrypted!")
+        print(f"WARNING: Add this to your .env file: ENCRYPTION_KEY={key_str}")
+        print(f"WARNING: If you have existing encrypted data, you MUST use the original encryption key!")
         return key
     else:
-        # If key is provided as string, encode it
+        # If key is provided as string, it should be base64-encoded (Fernet format)
         if isinstance(key, str):
-            # If it's a base64-encoded key, decode it
+            # Try to decode as base64 first (Fernet keys are base64-encoded strings)
             try:
-                return base64.urlsafe_b64decode(key)
-            except:
-                # If not base64, treat as raw string and encode
+                decoded = base64.urlsafe_b64decode(key)
+                # Verify it's 32 bytes (Fernet key length)
+                if len(decoded) == 32:
+                    return decoded
+                else:
+                    print(f"WARNING: Decoded key length is {len(decoded)}, expected 32 bytes. Trying to use as-is.")
+                    return decoded
+            except Exception as e:
+                # If not valid base64, this is an error - Fernet keys must be base64
+                print(f"ERROR: Encryption key is not valid base64. Fernet keys must be base64-encoded. Error: {e}")
+                # Try to encode as bytes anyway (will likely fail, but better than crashing)
                 return key.encode()
+        # If already bytes, return as-is
+        if isinstance(key, bytes):
+            if len(key) == 32:
+                return key
+            else:
+                print(f"WARNING: Key length is {len(key)} bytes, expected 32 bytes for Fernet.")
         return key
 
 

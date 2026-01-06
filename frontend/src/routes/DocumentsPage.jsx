@@ -43,20 +43,36 @@ const DocumentsPage = () => {
         try {
           const task = await api.getIngestionTaskStatus(activeTask);
           setTaskProgress(task);
+          
+          // Update upload progress based on task progress
+          if (task.progress !== undefined) {
+            setUploadProgress(task.progress);
+          }
+          
           if (task.status === "completed" || task.status === "failed") {
             clearInterval(interval);
             setActiveTask(null);
+            setUploadProgress(task.status === "completed" ? 100 : 0);
+            
             if (task.status === "completed") {
               setStatus({
                 type: "success",
                 message: `Ingestion completed! Knowledge base ID: ${task.knowledge_base_id || "N/A"}`,
+              });
+              // Reload local files and knowledge bases after completion
+              await loadLocalFiles();
+              await loadKnowledgeBases();
+            } else {
+              setStatus({
+                type: "error",
+                message: `Ingestion failed: ${task.error || "Unknown error"}`,
               });
             }
           }
         } catch (e) {
           console.error("Error fetching task status:", e);
         }
-      }, 2000);
+      }, 1000); // Poll every second for better UX
       return () => clearInterval(interval);
     }
   }, [activeTask]);
@@ -221,16 +237,6 @@ const DocumentsPage = () => {
     const formData = new FormData();
     Array.from(files).forEach((file) => formData.append("files", file));
 
-    const progressInterval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 200);
-
     try {
       const res = await fetch(
         `${import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000"}/api/ingest/upload`,
@@ -241,35 +247,38 @@ const DocumentsPage = () => {
         }
       );
 
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(errorText || "Upload failed");
       }
 
       const data = await res.json();
-      setStatus({
-        type: "success",
-        message: `Successfully uploaded and ingested ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id}`,
-      });
       
-      // Reload local files and knowledge bases after upload
-      await loadLocalFiles();
-      await loadKnowledgeBases();
-      
-      setTimeout(() => {
-        setUploadProgress(0);
-      }, 1000);
+      if (data.task_id) {
+        // Async upload - start polling for progress
+        setActiveTask(data.task_id);
+        setStatus({
+          type: "info",
+          message: `Upload started. Processing ${files.length} file(s) in background...`,
+        });
+        setLoading(false); // Allow user to continue while processing
+      } else {
+        // Legacy synchronous response (shouldn't happen with new API)
+        setUploadProgress(100);
+        setStatus({
+          type: "success",
+          message: `Successfully uploaded and ingested ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id}`,
+        });
+        await loadLocalFiles();
+        await loadKnowledgeBases();
+        setLoading(false);
+      }
     } catch (e) {
-      clearInterval(progressInterval);
       setUploadProgress(0);
       setStatus({
         type: "error",
         message: `Error: ${e.message}`,
       });
-    } finally {
       setLoading(false);
     }
   };
@@ -804,21 +813,40 @@ const DocumentsPage = () => {
         </div>
       )}
 
-      {/* Task Progress */}
+      {/* Task Progress - Show for both file uploads and drive ingestion */}
       {taskProgress && (
         <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
-          <h3 style={{ marginBottom: "var(--spacing-md)", fontSize: "1.125rem", fontWeight: 600 }}>
-            Ingestion Progress
-          </h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-md)" }}>
+            <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>
+              {taskProgress.tool_name === "local" ? "📤 File Upload Progress" : "🔄 Ingestion Progress"}
+            </h3>
+            <span
+              style={{
+                padding: "var(--spacing-xs) var(--spacing-md)",
+                background: taskProgress.status === "completed" ? "var(--success)" : 
+                           taskProgress.status === "failed" ? "var(--error)" : "var(--primary)",
+                color: "var(--text-inverse)",
+                borderRadius: "var(--radius-full)",
+                fontSize: "0.75rem",
+                fontWeight: 500,
+              }}
+            >
+              {taskProgress.status === "running" ? "⏳ Processing" : 
+               taskProgress.status === "completed" ? "✅ Completed" : 
+               taskProgress.status === "failed" ? "❌ Failed" : "⏸ Pending"}
+            </span>
+          </div>
           <div style={{ marginBottom: "var(--spacing-sm)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--spacing-xs)" }}>
-              <span>{taskProgress.message || "Processing..."}</span>
-              <span>{taskProgress.progress.toFixed(1)}%</span>
+              <span style={{ fontSize: "0.875rem" }}>{taskProgress.message || "Processing..."}</span>
+              <span style={{ fontSize: "0.875rem", fontWeight: 600 }}>
+                {taskProgress.progress?.toFixed(1) || 0}%
+              </span>
             </div>
             <div
               style={{
                 width: "100%",
-                height: "8px",
+                height: "12px",
                 background: "var(--gray-200)",
                 borderRadius: "var(--radius-full)",
                 overflow: "hidden",
@@ -826,17 +854,43 @@ const DocumentsPage = () => {
             >
               <div
                 style={{
-                  width: `${taskProgress.progress}%`,
+                  width: `${taskProgress.progress || 0}%`,
                   height: "100%",
-                  background: "var(--primary)",
+                  background: taskProgress.status === "failed" ? "var(--error)" : "var(--primary)",
                   transition: "width 0.3s ease",
                 }}
               />
             </div>
           </div>
-          <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-            {taskProgress.processed_items} of {taskProgress.total_items} items processed
-          </div>
+          {taskProgress.total_items > 0 && (
+            <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+              {taskProgress.processed_items || 0} of {taskProgress.total_items} items processed
+            </div>
+          )}
+          {taskProgress.error && (
+            <div style={{ 
+              marginTop: "var(--spacing-sm)", 
+              padding: "var(--spacing-sm)", 
+              background: "var(--error-light)", 
+              color: "var(--error)", 
+              borderRadius: "var(--radius-md)",
+              fontSize: "0.875rem"
+            }}>
+              ⚠️ Error: {taskProgress.error}
+            </div>
+          )}
+          {taskProgress.knowledge_base_id && taskProgress.status === "completed" && (
+            <div style={{ 
+              marginTop: "var(--spacing-sm)", 
+              padding: "var(--spacing-sm)", 
+              background: "var(--success-light)", 
+              color: "var(--success-dark)", 
+              borderRadius: "var(--radius-md)",
+              fontSize: "0.875rem"
+            }}>
+              ✅ Knowledge Base ID: {taskProgress.knowledge_base_id}
+            </div>
+          )}
         </div>
       )}
 

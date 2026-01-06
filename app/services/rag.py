@@ -2,7 +2,7 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
-from langchain_community.vectorstores.pgvector import PGVector
+from langchain_postgres import PGVector
 # Use LangChain Expression Language (LCEL) for RAG - compatible with LangChain 0.1.0+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -121,8 +121,9 @@ def get_vectorstore(collection_name: str, api_key: Optional[str] = None) -> PGVe
     
     vectorstore = PGVector(
         collection_name=collection_name,
-        connection_string=settings.database_url,
-        embedding_function=embeddings,
+        connection=settings.database_url,
+        embeddings=embeddings,
+        use_jsonb=True,  # Use JSONB for metadata as recommended
     )
     return vectorstore
 
@@ -130,7 +131,8 @@ def get_vectorstore(collection_name: str, api_key: Optional[str] = None) -> PGVe
 def get_qa_chain(
     collection_name: str,
     llm: BaseChatModel,
-    use_rag: bool = True
+    use_rag: bool = True,
+    source_filter: Optional[str] = None
 ):
     """
     Create a QA chain for querying documents.
@@ -139,13 +141,24 @@ def get_qa_chain(
         collection_name: Collection name for vectorstore
         llm: LLM instance to use
         use_rag: Whether to use RAG (if False, just uses LLM without retrieval)
+        source_filter: Optional source filter - 'document', 'zendesk', or None for 'all'
     """
     if use_rag:
         # Return retriever and LLM separately - we'll create the chain when needed
         vectorstore = get_vectorstore(collection_name)
+        
+        # Build filter based on source_filter
+        # With JSONB metadata, use $eq operator for equality filters
+        # For "document" filter (not zendesk), we'll filter after retrieval
+        search_kwargs = {"k": settings.retrieval_k * 2 if source_filter == "document" else settings.retrieval_k}
+        if source_filter == "zendesk":
+            # Filter for zendesk only - use $eq operator for JSONB
+            search_kwargs["filter"] = {"$eq": {"source": "zendesk"}}
+        # For "document" or "all", we'll handle filtering in ask_question after retrieval
+        
         retriever = vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": settings.retrieval_k}
+            search_kwargs=search_kwargs
         )
         return (retriever, llm), True
     else:
@@ -210,7 +223,8 @@ def ask_question(
     db: Session,
     request: Optional[Request] = None,
     llm_config_id: Optional[int] = None,
-    use_rag: bool = True
+    use_rag: bool = True,
+    source_filter: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Ask a question using the RAG pipeline for a specific user.
@@ -222,6 +236,7 @@ def ask_question(
         request: FastAPI Request object for logging IP and user agent
         llm_config_id: Optional LLM config ID to use
         use_rag: Whether to use RAG (default True)
+        source_filter: Optional source filter - 'document', 'zendesk', or None for 'all'
         
     Returns:
         Dictionary with 'answer' and 'sources'
@@ -275,7 +290,7 @@ def ask_question(
             llm = get_llm_from_config(temp_config)
         
         # Get retriever and LLM
-        retriever_llm, is_rag = get_qa_chain(collection_name, llm, use_rag)
+        retriever_llm, is_rag = get_qa_chain(collection_name, llm, use_rag, source_filter=source_filter)
         
         if is_rag:
             retriever, llm = retriever_llm
@@ -299,6 +314,13 @@ def ask_question(
                             "Retriever does not support invoke(), direct call, or get_relevant_documents(). "
                             "Please check your LangChain version compatibility."
                         )
+            
+            # Apply source filter if needed (for "document" filter - exclude zendesk)
+            if source_filter == "document":
+                source_docs = [
+                    doc for doc in source_docs 
+                    if doc.metadata.get("source") != "zendesk"
+                ][:settings.retrieval_k]  # Limit to retrieval_k after filtering
             
             # Format context from documents
             context = "\n\n".join(doc.page_content for doc in source_docs)
@@ -339,7 +361,8 @@ def ask_question(
                 "num_sources": len(sources),
                 "sources": [src.get("metadata", {}).get("file_name", "unknown") for src in sources] if sources else [],
                 "use_rag": use_rag,
-                "llm_provider": llm_config.provider if llm_config else "default"
+                "llm_provider": llm_config.provider if llm_config else "default",
+                "source_filter": source_filter or "all"
             },
             ip_address=get_client_ip(request) if request else None,
             user_agent=get_user_agent(request) if request else None,

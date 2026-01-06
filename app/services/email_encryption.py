@@ -24,7 +24,7 @@ def decrypt_email(encrypted_email: str) -> str:
     Decrypt an email address.
     
     If the email is already plain text (contains @), returns it as-is.
-    If decryption fails for any reason, returns the original value.
+    If decryption fails for any reason, attempts to return a readable value.
     This ensures the function never raises an exception and always returns a value.
     """
     if not encrypted_email:
@@ -34,18 +34,46 @@ def decrypt_email(encrypted_email: str) -> str:
     if "@" in encrypted_email:
         return encrypted_email
     
+    # Check if it looks like a Fernet token (starts with gAAAAA)
+    if not encrypted_email.startswith('gAAAAA'):
+        # Doesn't look encrypted, return as-is
+        return encrypted_email
+    
+    # Try to decrypt - Fernet tokens are base64 encoded
     try:
-        f = Fernet(get_encryption_key())
-        decrypted = f.decrypt(encrypted_email.encode()).decode()
-        return decrypted
+        encryption_key = get_encryption_key()
+        # Ensure key is bytes
+        if isinstance(encryption_key, str):
+            # Try to decode as base64 first (Fernet keys are base64-encoded)
+            try:
+                encryption_key = base64.urlsafe_b64decode(encryption_key)
+            except:
+                # If not base64, encode as bytes
+                encryption_key = encryption_key.encode()
+        
+        f = Fernet(encryption_key)
+        decrypted_bytes = f.decrypt(encrypted_email.encode())
+        decrypted = decrypted_bytes.decode('utf-8')
+        
+        # Verify it looks like an email after decryption
+        if "@" in decrypted and "." in decrypted and len(decrypted) > 5:
+            return decrypted
+        else:
+            # Decrypted but doesn't look like email, might be corrupted
+            # Try to return it anyway if it's reasonable length
+            if len(decrypted) < 100:  # Reasonable email length
+                return decrypted
+            print(f"Warning: Decrypted value doesn't look like an email (length: {len(decrypted)}, value: {decrypted[:50]}...)")
+            return encrypted_email
     except Exception as e:
-        # If decryption fails, return the original value
-        # This handles cases where:
-        # - Email is already plain text but doesn't contain @ (unlikely but possible)
-        # - Encryption key changed
-        # - Email is corrupted
-        # In all cases, returning the original is safer than raising an exception
-        print(f"Warning: Could not decrypt email (may already be plain text): {e}")
+        # Any error during decryption - log it for debugging
+        error_type = type(e).__name__
+        error_msg = str(e)
+        print(f"Error: Could not decrypt email. Type: {error_type}, Message: {error_msg}")
+        print(f"Encrypted email (first 50 chars): {encrypted_email[:50]}...")
+        
+        # Return original encrypted value - this indicates a configuration issue
+        # The encryption key might not match the one used to encrypt
         return encrypted_email
 
 
