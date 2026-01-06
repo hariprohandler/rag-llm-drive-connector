@@ -301,7 +301,7 @@ const AppLayout = () => {
           >
             ☰
           </button>
-          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>RAG Chat Platform</h1>
+          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Anukara</h1>
         </div>
 
         <div style={{ padding: "var(--spacing-xl)", maxWidth: "1200px", margin: "0 auto" }}>

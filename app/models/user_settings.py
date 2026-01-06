@@ -10,7 +10,7 @@ class UserSettings(Base):
     
     id = Column(String, primary_key=True)  # Same as user_id (one-to-one relationship)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
-    organization_name = Column(String, nullable=True, default="RAG Chat Platform")
+    organization_name = Column(String, nullable=True, default="Anukara")
     preferences = Column(Text, nullable=True)  # JSON string for additional preferences
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

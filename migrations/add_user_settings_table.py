@@ -43,7 +43,7 @@ def run_migration():
             CREATE TABLE IF NOT EXISTS user_settings (
                 id VARCHAR NOT NULL PRIMARY KEY,
                 user_id VARCHAR NOT NULL UNIQUE,
-                organization_name VARCHAR DEFAULT 'RAG Chat Platform',
+                organization_name VARCHAR DEFAULT 'Anukara',
                 preferences TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
