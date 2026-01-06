@@ -662,7 +662,7 @@ const ChatPage = () => {
                   boxShadow: queryType === "file" ? "var(--shadow-sm)" : "none",
                 }}
               >
-                📄 File Query
+                📄 RAG Search
               </button>
             </div>
 
