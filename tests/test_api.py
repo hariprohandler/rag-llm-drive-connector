@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app import app
 from models import User
-from auth_service import create_access_token
+from app.services.auth_service import create_access_token
 
 
 @pytest.fixture

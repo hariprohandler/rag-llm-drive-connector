@@ -13,7 +13,7 @@ from app.services.llm_service import (
     update_llm_config,
     delete_llm_config,
 )
-from auth_service import get_current_user
+from app.services.auth_service import get_current_user
 
 
 class LLMConfigRequest(BaseModel):

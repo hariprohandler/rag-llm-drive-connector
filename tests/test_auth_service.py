@@ -1,7 +1,7 @@
 """Tests for authentication service."""
 import pytest
 from datetime import timedelta
-from auth_service import (
+from app.services.auth_service import (
     create_access_token,
     verify_token,
     get_or_create_user,

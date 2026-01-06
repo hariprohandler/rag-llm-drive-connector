@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.models.base import get_db
 from app.services.rag import ask_question
-from auth_service import get_current_user
+from app.services.auth_service import get_current_user
 
 
 class QueryRequest(BaseModel):

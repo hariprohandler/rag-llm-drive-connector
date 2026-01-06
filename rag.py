@@ -10,7 +10,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 import config
 import models
-from activity_logger import get_logger, get_client_ip, get_user_agent
+from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
 import time
 
 

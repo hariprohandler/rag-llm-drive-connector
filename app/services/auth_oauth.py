@@ -7,9 +7,9 @@ from googleapiclient.discovery import build
 import msal
 from typing import Dict, Optional, Any, Tuple
 import config
-import models
-from auth_service import get_or_create_user, create_access_token
-from activity_logger import get_logger, get_client_ip, get_user_agent
+from app.models import User
+from app.services.auth_service import get_or_create_user, create_access_token
+from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
 import secrets
 
 # In-memory storage for OAuth state (use Redis in production)
@@ -81,7 +81,7 @@ def get_google_auth_url(redirect_uri: str, request: Optional[Request] = None) ->
     return auth_url, state
 
 
-def handle_google_callback(code: str, state: str, db: Session, request: Optional[Request] = None) -> Tuple[models.User, str]:
+def handle_google_callback(code: str, state: str, db: Session, request: Optional[Request] = None) -> Tuple[User, str]:
     """Handle Google OAuth callback and create/update user."""
     logger = get_logger()
     
@@ -208,7 +208,7 @@ def get_microsoft_auth_url(redirect_uri: str, request: Optional[Request] = None)
     return auth_url, state
 
 
-def handle_microsoft_callback(code: str, state: str, db: Session, request: Optional[Request] = None) -> Tuple[models.User, str]:
+def handle_microsoft_callback(code: str, state: str, db: Session, request: Optional[Request] = None) -> Tuple[User, str]:
     """Handle Microsoft OAuth callback and create/update user."""
     logger = get_logger()
     
@@ -333,3 +333,4 @@ def handle_microsoft_callback(code: str, state: str, db: Session, request: Optio
             user_agent=get_user_agent(request) if request else None
         )
         raise
+

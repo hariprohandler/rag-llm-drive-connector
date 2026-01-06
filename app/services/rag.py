@@ -14,7 +14,7 @@ from fastapi import Request, HTTPException
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import LLMConfig
-from activity_logger import get_logger, get_client_ip, get_user_agent
+from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
 import time
 
 

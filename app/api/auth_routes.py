@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.base import get_db
 from app.models import User
-from auth_service import verify_token
-from auth_oauth import (
+from app.services.auth_service import verify_token
+from app.services.auth_oauth import (
     get_google_auth_url,
     handle_google_callback,
     get_microsoft_auth_url,

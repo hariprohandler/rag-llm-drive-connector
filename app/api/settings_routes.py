@@ -6,7 +6,7 @@ from datetime import datetime
 
 from app.models import User, UserSettings
 from app.models.base import get_db
-from auth_service import get_current_user
+from app.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 

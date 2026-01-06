@@ -8,7 +8,7 @@ from typing import Optional
 from app.models import User
 from app.models.base import get_db
 import config
-from activity_logger import get_logger, get_client_ip, get_user_agent
+from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
 
 # JWT Configuration
 SECRET_KEY = config.settings.jwt_secret_key or config.settings.openai_api_key  # Use dedicated key if set
@@ -222,3 +222,4 @@ def get_or_create_user(
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """Get user by email."""
     return db.query(User).filter(User.email == email).first()
+

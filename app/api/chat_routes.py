@@ -16,7 +16,7 @@ from app.services.chat_service import (
     get_messages,
 )
 from app.services.rag import ask_question
-from auth_service import get_current_user
+from app.services.auth_service import get_current_user
 
 
 class ChatMessageRequest(BaseModel):

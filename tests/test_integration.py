@@ -19,7 +19,7 @@ def test_full_ingestion_pipeline(temp_directory, mock_openai_api_key, db_session
     
     # Create test user
     from models import User
-    from auth_service import get_or_create_user
+    from app.services.auth_service import get_or_create_user
     
     user = get_or_create_user(
         db=db_session,
@@ -46,7 +46,7 @@ def test_full_ingestion_pipeline(temp_directory, mock_openai_api_key, db_session
 @pytest.mark.integration
 def test_user_authentication_flow(db_session):
     """Test complete user authentication flow."""
-    from auth_service import get_or_create_user, create_access_token, verify_token
+    from app.services.auth_service import get_or_create_user, create_access_token, verify_token
     
     # Create user
     user = get_or_create_user(
@@ -72,7 +72,7 @@ def test_user_authentication_flow(db_session):
 def test_query_with_mocked_rag(mock_openai_api_key, db_session):
     """Test querying with mocked RAG pipeline."""
     from models import User
-    from auth_service import get_or_create_user
+    from app.services.auth_service import get_or_create_user
     from unittest.mock import patch, Mock
     
     # Create user
