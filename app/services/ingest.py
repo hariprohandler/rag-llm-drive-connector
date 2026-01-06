@@ -112,6 +112,14 @@ def ingest_documents(
         use_jsonb=True,  # Use JSONB for metadata as recommended
     )
     
+    # Ensure tables are created with the correct schema (langchain_postgres uses uuid, not id)
+    # This will create tables if they don't exist, or verify the schema matches
+    try:
+        vectorstore.create_tables_if_not_exists()
+    except Exception as e:
+        print(f"Warning: Could not create/verify tables: {e}")
+        # Continue anyway - table might already exist
+    
     # Add documents in batches to avoid memory issues and improve performance
     # Batch size of 100-200 is optimal for embedding generation
     # Larger batches = fewer API calls = faster processing

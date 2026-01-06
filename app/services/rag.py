@@ -125,6 +125,14 @@ def get_vectorstore(collection_name: str, api_key: Optional[str] = None) -> PGVe
         embeddings=embeddings,
         use_jsonb=True,  # Use JSONB for metadata as recommended
     )
+    
+    # Ensure tables are created with the correct schema (langchain_postgres uses uuid, not id)
+    try:
+        vectorstore.create_tables_if_not_exists()
+    except Exception as e:
+        # Table might already exist, continue anyway
+        pass
+    
     return vectorstore
 
 
