@@ -175,6 +175,17 @@ async def create_tool_config(
             
     except HTTPException:
         raise
+    except ValueError as e:
+        # Handle encryption key errors with user-friendly message
+        error_msg = str(e)
+        if "ENCRYPTION_KEY" in error_msg or "encrypt" in error_msg.lower() or "Fernet" in error_msg:
+            activity_logger.log_error(f"Encryption configuration error: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail="System configuration error: Encryption key is not properly configured. Please contact system administrator."
+            )
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         activity_logger.log_error(str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -243,6 +254,17 @@ async def update_tool_config(
         
     except HTTPException:
         raise
+    except ValueError as e:
+        # Handle encryption key errors with user-friendly message
+        error_msg = str(e)
+        if "ENCRYPTION_KEY" in error_msg or "encrypt" in error_msg.lower() or "Fernet" in error_msg:
+            activity_logger.log_error(f"Encryption configuration error: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail="System configuration error: Encryption key is not properly configured. Please contact system administrator."
+            )
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         activity_logger.log_error(str(e))
         raise HTTPException(status_code=500, detail=str(e))

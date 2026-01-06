@@ -41,17 +41,24 @@ def decrypt_email(encrypted_email: str) -> str:
     
     # Try to decrypt - Fernet tokens are base64 encoded
     try:
-        encryption_key = get_encryption_key()
-        # Ensure key is bytes
-        if isinstance(encryption_key, str):
-            # Try to decode as base64 first (Fernet keys are base64-encoded)
-            try:
-                encryption_key = base64.urlsafe_b64decode(encryption_key)
-            except:
-                # If not base64, encode as bytes
-                encryption_key = encryption_key.encode()
-        
-        f = Fernet(encryption_key)
+        encryption_key = get_encryption_key()  # Returns base64-encoded string
+        # Fernet accepts base64-encoded strings directly
+        # Validate key before using it
+        try:
+            f = Fernet(encryption_key)
+        except Exception as fernet_error:
+            error_msg = (
+                f"ERROR: Invalid encryption key format. Fernet key must be 32 url-safe base64-encoded bytes.\n"
+                f"  This is a SYSTEM-LEVEL configuration error (not a user error).\n"
+                f"  ENCRYPTION_KEY environment variable is set to an invalid value by the system administrator.\n"
+                f"  ENCRYPTION_KEY should be a Fernet key (generated with Fernet.generate_key()), NOT an API token.\n"
+                f"  System administrator should generate a key with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'\n"
+                f"  Note: Users should NEVER interact with ENCRYPTION_KEY - they just enter their API tokens in the UI normally.\n"
+                f"  The system automatically encrypts user tokens before storing them in the database.\n"
+                f"  Original error: {fernet_error}"
+            )
+            print(error_msg)
+            raise ValueError(error_msg)
         decrypted_bytes = f.decrypt(encrypted_email.encode())
         decrypted = decrypted_bytes.decode('utf-8')
         
