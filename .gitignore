@@ -25,6 +25,7 @@ wheels/
 
 # Environment variables - NEVER commit these!
 .env
+.env.development
 .env.production
 # Allow .env.example as a template
 !.env.example
