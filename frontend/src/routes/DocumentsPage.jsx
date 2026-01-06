@@ -1,20 +1,162 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { api } from "../api.js";
 
 const DocumentsPage = () => {
-  const [activeTab, setActiveTab] = useState("local"); // 'local', 'googledrive', 'onedrive'
+  const [activeTab, setActiveTab] = useState("local");
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   
-  // Google Drive state
-  const [googleFolderId, setGoogleFolderId] = useState("");
-  const [googleLoading, setGoogleLoading] = useState(false);
+  // Drive connection status
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [microsoftConnected, setMicrosoftConnected] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
   
-  // OneDrive state
-  const [oneDrivePath, setOneDrivePath] = useState("");
-  const [oneDriveLoading, setOneDriveLoading] = useState(false);
+  // File browser state
+  const [googleFiles, setGoogleFiles] = useState([]);
+  const [microsoftFiles, setMicrosoftFiles] = useState([]);
+  const [selectedItems, setSelectedItems] = useState([]);
+  const [currentFolder, setCurrentFolder] = useState({ google: null, microsoft: "/" });
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  
+  // Ingestion task state
+  const [activeTask, setActiveTask] = useState(null);
+  const [taskProgress, setTaskProgress] = useState(null);
+
+  // Check connection status on mount and tab change
+  useEffect(() => {
+    checkConnectionStatus();
+  }, [activeTab]);
+
+  // Poll task progress if active
+  useEffect(() => {
+    if (activeTask) {
+      const interval = setInterval(async () => {
+        try {
+          const task = await api.getIngestionTaskStatus(activeTask);
+          setTaskProgress(task);
+          if (task.status === "completed" || task.status === "failed") {
+            clearInterval(interval);
+            setActiveTask(null);
+            if (task.status === "completed") {
+              setStatus({
+                type: "success",
+                message: `Ingestion completed! Knowledge base ID: ${task.knowledge_base_id || "N/A"}`,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Error fetching task status:", e);
+        }
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTask]);
+
+  const checkConnectionStatus = async () => {
+    setCheckingStatus(true);
+    try {
+      if (activeTab === "googledrive") {
+        const status = await api.checkGoogleDriveStatus();
+        setGoogleConnected(status.connected);
+        if (status.connected) {
+          loadGoogleFiles();
+        }
+      } else if (activeTab === "onedrive") {
+        const status = await api.checkMicrosoftOneDriveStatus();
+        setMicrosoftConnected(status.connected);
+        if (status.connected) {
+          loadMicrosoftFiles();
+        }
+      }
+    } catch (e) {
+      console.error("Error checking connection status:", e);
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
+  const loadGoogleFiles = async (folderId = null) => {
+    setLoadingFiles(true);
+    try {
+      const result = await api.listGoogleFiles(folderId);
+      setGoogleFiles(result.files || []);
+      setCurrentFolder({ ...currentFolder, google: folderId });
+    } catch (e) {
+      setStatus({
+        type: "error",
+        message: `Error loading files: ${e.message}`,
+      });
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const loadMicrosoftFiles = async (folderPath = "/") => {
+    setLoadingFiles(true);
+    try {
+      const result = await api.listMicrosoftFiles(folderPath);
+      setMicrosoftFiles(result.files || []);
+      setCurrentFolder({ ...currentFolder, microsoft: folderPath });
+    } catch (e) {
+      setStatus({
+        type: "error",
+        message: `Error loading files: ${e.message}`,
+      });
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const toggleItemSelection = (item) => {
+    setSelectedItems((prev) => {
+      const exists = prev.find((i) => i.id === item.id);
+      if (exists) {
+        return prev.filter((i) => i.id !== item.id);
+      } else {
+        return [...prev, item];
+      }
+    });
+  };
+
+  const handleStartIngestion = async (provider) => {
+    if (selectedItems.length === 0) {
+      setStatus({
+        type: "error",
+        message: "Please select at least one file or folder",
+      });
+      return;
+    }
+
+    try {
+      const items = selectedItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        path: item.path,
+      }));
+
+      let result;
+      if (provider === "google") {
+        result = await api.startGoogleIngestion({ items });
+      } else {
+        result = await api.startMicrosoftIngestion({ items });
+      }
+
+      setActiveTask(result.task_id);
+      setSelectedItems([]);
+      setStatus({
+        type: "info",
+        message: "Ingestion started in background. Progress will be shown below.",
+      });
+    } catch (e) {
+      setStatus({
+        type: "error",
+        message: `Error starting ingestion: ${e.message}`,
+      });
+    }
+  };
 
   const handleUpload = async (files) => {
     if (!files || files.length === 0) return;
@@ -26,7 +168,6 @@ const DocumentsPage = () => {
     const formData = new FormData();
     Array.from(files).forEach((file) => formData.append("files", file));
 
-    // Simulate progress (since we can't track actual upload progress easily)
     const progressInterval = setInterval(() => {
       setUploadProgress((prev) => {
         if (prev >= 90) {
@@ -76,78 +217,6 @@ const DocumentsPage = () => {
     }
   };
 
-  const handleGoogleDriveIngest = async () => {
-    if (!googleFolderId.trim()) {
-      setStatus({
-        type: "error",
-        message: "Please enter a Google Drive folder ID",
-      });
-      return;
-    }
-
-    setGoogleLoading(true);
-    setStatus(null);
-
-    try {
-      const data = await api.ingestGoogleDrive({ folder_id: googleFolderId.trim() });
-      setStatus({
-        type: "success",
-        message: `Successfully ingested Google Drive folder. Knowledge base ID: ${data.knowledge_base_id || "N/A"}`,
-      });
-      setGoogleFolderId("");
-    } catch (e) {
-      let errorMessage = "Failed to ingest from Google Drive";
-      try {
-        const errorData = JSON.parse(e.message);
-        errorMessage = errorData.detail || errorMessage;
-      } catch {
-        errorMessage = e.message || errorMessage;
-      }
-      setStatus({
-        type: "error",
-        message: `Error: ${errorMessage}`,
-      });
-    } finally {
-      setGoogleLoading(false);
-    }
-  };
-
-  const handleOneDriveIngest = async () => {
-    if (!oneDrivePath.trim()) {
-      setStatus({
-        type: "error",
-        message: "Please enter a OneDrive folder path",
-      });
-      return;
-    }
-
-    setOneDriveLoading(true);
-    setStatus(null);
-
-    try {
-      const data = await api.ingestOneDrive({ folder_path: oneDrivePath.trim() });
-      setStatus({
-        type: "success",
-        message: `Successfully ingested OneDrive folder. Knowledge base ID: ${data.knowledge_base_id || "N/A"}`,
-      });
-      setOneDrivePath("");
-    } catch (e) {
-      let errorMessage = "Failed to ingest from OneDrive";
-      try {
-        const errorData = JSON.parse(e.message);
-        errorMessage = errorData.detail || errorMessage;
-      } catch {
-        errorMessage = e.message || errorMessage;
-      }
-      setStatus({
-        type: "error",
-        message: `Error: ${errorMessage}`,
-      });
-    } finally {
-      setOneDriveLoading(false);
-    }
-  };
-
   const handleFileInput = (e) => {
     handleUpload(e.target.files);
   };
@@ -176,6 +245,8 @@ const DocumentsPage = () => {
     { id: "googledrive", label: "Google Drive", icon: "☁️" },
     { id: "onedrive", label: "Microsoft OneDrive", icon: "📂" },
   ];
+
+  const currentFiles = activeTab === "googledrive" ? googleFiles : microsoftFiles;
 
   return (
     <div className="page-enter">
@@ -209,7 +280,10 @@ const DocumentsPage = () => {
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id);
+              setSelectedItems([]);
+            }}
             className={`btn ${activeTab === tab.id ? "btn-primary" : "btn-secondary"}`}
             style={{
               flex: "1 1 auto",
@@ -220,7 +294,6 @@ const DocumentsPage = () => {
               gap: "var(--spacing-xs)",
               fontSize: "0.875rem",
               fontWeight: 500,
-              transition: "all var(--transition-base)",
             }}
           >
             <span style={{ fontSize: "1.125rem" }}>{tab.icon}</span>
@@ -312,170 +385,299 @@ const DocumentsPage = () => {
 
       {/* Google Drive Tab */}
       {activeTab === "googledrive" && (
-        <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
-          <div style={{ textAlign: "center", marginBottom: "var(--spacing-xl)" }}>
-            <div
-              style={{
-                fontSize: "3rem",
-                marginBottom: "var(--spacing-md)",
-              }}
-            >
-              ☁️
+        <div className="fade-in-up">
+          {checkingStatus ? (
+            <div className="card" style={{ textAlign: "center", padding: "var(--spacing-2xl)" }}>
+              <div className="spinner" style={{ width: "2rem", height: "2rem", margin: "0 auto" }} />
+              <p style={{ marginTop: "var(--spacing-md)", color: "var(--text-secondary)" }}>Checking connection...</p>
             </div>
-            <h3 style={{ marginBottom: "var(--spacing-sm)", fontSize: "1.25rem", fontWeight: 600 }}>
-              Connect Google Drive
-            </h3>
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginBottom: "var(--spacing-lg)" }}>
-              Enter the Google Drive folder ID to ingest documents
-            </p>
-          </div>
-
-          <div style={{ marginBottom: "var(--spacing-lg)" }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: "var(--spacing-sm)",
-                fontWeight: 500,
-                fontSize: "0.875rem",
-                color: "var(--text-primary)",
-              }}
-            >
-              Folder ID
-            </label>
-            <input
-              type="text"
-              value={googleFolderId}
-              onChange={(e) => setGoogleFolderId(e.target.value)}
-              placeholder="e.g., 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-              disabled={googleLoading}
-              className="input"
-              style={{
-                width: "100%",
-                padding: "var(--spacing-md)",
-                fontSize: "0.875rem",
-              }}
-            />
-            <p
-              style={{
-                marginTop: "var(--spacing-xs)",
-                fontSize: "0.75rem",
-                color: "var(--text-secondary)",
-              }}
-            >
-              You can find the folder ID in the Google Drive URL:{" "}
-              <code style={{ background: "var(--gray-100)", padding: "2px 4px", borderRadius: "4px" }}>
-                drive.google.com/drive/folders/[FOLDER_ID]
-              </code>
-            </p>
-          </div>
-
-          <button
-            onClick={handleGoogleDriveIngest}
-            disabled={googleLoading || !googleFolderId.trim()}
-            className="btn btn-primary"
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "var(--spacing-sm)",
-            }}
-          >
-            {googleLoading ? (
-              <>
-                <div className="spinner" style={{ width: "1rem", height: "1rem" }} />
-                Connecting...
-              </>
-            ) : (
-              <>
+          ) : !googleConnected ? (
+            <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)", textAlign: "center", padding: "var(--spacing-2xl)" }}>
+              <div style={{ fontSize: "3rem", marginBottom: "var(--spacing-md)" }}>☁️</div>
+              <h3 style={{ marginBottom: "var(--spacing-sm)", fontSize: "1.25rem", fontWeight: 600 }}>
+                Connect Google Drive
+              </h3>
+              <p style={{ color: "var(--text-secondary)", marginBottom: "var(--spacing-lg)", fontSize: "0.875rem" }}>
+                Connect your Google Drive to browse and select files for RAG ingestion
+              </p>
+              <button
+                onClick={() => api.connectGoogleDrive()}
+                className="btn btn-primary"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-sm)",
+                  margin: "0 auto",
+                }}
+              >
                 <span>🔗</span>
-                Connect & Ingest
-              </>
-            )}
-          </button>
+                Connect Google Drive
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* File Browser */}
+              <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-md)" }}>
+                  <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>Google Drive Files</h3>
+                  <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
+                    {currentFolder.google && (
+                      <button
+                        onClick={() => loadGoogleFiles(null)}
+                        className="btn btn-secondary"
+                        style={{ fontSize: "0.875rem" }}
+                      >
+                        ← Root
+                      </button>
+                    )}
+                    <button
+                      onClick={() => loadGoogleFiles(currentFolder.google)}
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.875rem" }}
+                      disabled={loadingFiles}
+                    >
+                      {loadingFiles ? "Loading..." : "🔄 Refresh"}
+                    </button>
+                  </div>
+                </div>
+                
+                {loadingFiles ? (
+                  <div style={{ textAlign: "center", padding: "var(--spacing-xl)" }}>
+                    <div className="spinner" style={{ width: "2rem", height: "2rem", margin: "0 auto" }} />
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                    {currentFiles.length === 0 ? (
+                      <p style={{ textAlign: "center", color: "var(--text-secondary)", padding: "var(--spacing-xl)" }}>
+                        No files found
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-xs)" }}>
+                        {currentFiles.map((file) => {
+                          const isSelected = selectedItems.find((i) => i.id === file.id);
+                          return (
+                            <div
+                              key={file.id}
+                              onClick={() => {
+                                if (file.type === "folder") {
+                                  loadGoogleFiles(file.id);
+                                } else {
+                                  toggleItemSelection(file);
+                                }
+                              }}
+                              className={`hover-lift ${isSelected ? "scale-in" : ""}`}
+                              style={{
+                                padding: "var(--spacing-md)",
+                                border: `1px solid ${isSelected ? "var(--primary)" : "var(--gray-300)"}`,
+                                borderRadius: "var(--radius-md)",
+                                cursor: "pointer",
+                                background: isSelected ? "var(--primary-light)" : "transparent",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "var(--spacing-sm)",
+                              }}
+                            >
+                              <span style={{ fontSize: "1.25rem" }}>{file.type === "folder" ? "📁" : "📄"}</span>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 500 }}>{file.name}</div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                                  {file.type === "folder" ? "Folder" : `${(parseInt(file.size) / 1024).toFixed(2)} KB`}
+                                </div>
+                              </div>
+                              {isSelected && <span style={{ color: "var(--primary)" }}>✓</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selection and Actions */}
+              {selectedItems.length > 0 && (
+                <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
+                  <div style={{ marginBottom: "var(--spacing-md)" }}>
+                    <strong>{selectedItems.length}</strong> item(s) selected
+                  </div>
+                  <button
+                    onClick={() => handleStartIngestion("google")}
+                    className="btn btn-primary"
+                    style={{ width: "100%" }}
+                  >
+                    Start Ingestion
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
       {/* OneDrive Tab */}
       {activeTab === "onedrive" && (
+        <div className="fade-in-up">
+          {checkingStatus ? (
+            <div className="card" style={{ textAlign: "center", padding: "var(--spacing-2xl)" }}>
+              <div className="spinner" style={{ width: "2rem", height: "2rem", margin: "0 auto" }} />
+              <p style={{ marginTop: "var(--spacing-md)", color: "var(--text-secondary)" }}>Checking connection...</p>
+            </div>
+          ) : !microsoftConnected ? (
+            <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)", textAlign: "center", padding: "var(--spacing-2xl)" }}>
+              <div style={{ fontSize: "3rem", marginBottom: "var(--spacing-md)" }}>📂</div>
+              <h3 style={{ marginBottom: "var(--spacing-sm)", fontSize: "1.25rem", fontWeight: 600 }}>
+                Connect Microsoft OneDrive
+              </h3>
+              <p style={{ color: "var(--text-secondary)", marginBottom: "var(--spacing-lg)", fontSize: "0.875rem" }}>
+                Connect your OneDrive to browse and select files for RAG ingestion
+              </p>
+              <button
+                onClick={() => api.connectMicrosoftOneDrive()}
+                className="btn btn-primary"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-sm)",
+                  margin: "0 auto",
+                }}
+              >
+                <span>🔗</span>
+                Connect OneDrive
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* File Browser - Similar to Google Drive */}
+              <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-md)" }}>
+                  <h3 style={{ fontSize: "1.125rem", fontWeight: 600 }}>OneDrive Files</h3>
+                  <div style={{ display: "flex", gap: "var(--spacing-sm)" }}>
+                    {currentFolder.microsoft !== "/" && (
+                      <button
+                        onClick={() => loadMicrosoftFiles("/")}
+                        className="btn btn-secondary"
+                        style={{ fontSize: "0.875rem" }}
+                      >
+                        ← Root
+                      </button>
+                    )}
+                    <button
+                      onClick={() => loadMicrosoftFiles(currentFolder.microsoft)}
+                      className="btn btn-secondary"
+                      style={{ fontSize: "0.875rem" }}
+                      disabled={loadingFiles}
+                    >
+                      {loadingFiles ? "Loading..." : "🔄 Refresh"}
+                    </button>
+                  </div>
+                </div>
+                
+                {loadingFiles ? (
+                  <div style={{ textAlign: "center", padding: "var(--spacing-xl)" }}>
+                    <div className="spinner" style={{ width: "2rem", height: "2rem", margin: "0 auto" }} />
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                    {currentFiles.length === 0 ? (
+                      <p style={{ textAlign: "center", color: "var(--text-secondary)", padding: "var(--spacing-xl)" }}>
+                        No files found
+                      </p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-xs)" }}>
+                        {currentFiles.map((file) => {
+                          const isSelected = selectedItems.find((i) => i.id === file.id);
+                          return (
+                            <div
+                              key={file.id}
+                              onClick={() => {
+                                if (file.type === "folder") {
+                                  loadMicrosoftFiles(file.path || file.id);
+                                } else {
+                                  toggleItemSelection(file);
+                                }
+                              }}
+                              className={`hover-lift ${isSelected ? "scale-in" : ""}`}
+                              style={{
+                                padding: "var(--spacing-md)",
+                                border: `1px solid ${isSelected ? "var(--primary)" : "var(--gray-300)"}`,
+                                borderRadius: "var(--radius-md)",
+                                cursor: "pointer",
+                                background: isSelected ? "var(--primary-light)" : "transparent",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "var(--spacing-sm)",
+                              }}
+                            >
+                              <span style={{ fontSize: "1.25rem" }}>{file.type === "folder" ? "📁" : "📄"}</span>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 500 }}>{file.name}</div>
+                                <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                                  {file.type === "folder" ? "Folder" : `${(parseInt(file.size) / 1024).toFixed(2)} KB`}
+                                </div>
+                              </div>
+                              {isSelected && <span style={{ color: "var(--primary)" }}>✓</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selection and Actions */}
+              {selectedItems.length > 0 && (
+                <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
+                  <div style={{ marginBottom: "var(--spacing-md)" }}>
+                    <strong>{selectedItems.length}</strong> item(s) selected
+                  </div>
+                  <button
+                    onClick={() => handleStartIngestion("microsoft")}
+                    className="btn btn-primary"
+                    style={{ width: "100%" }}
+                  >
+                    Start Ingestion
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Task Progress */}
+      {taskProgress && (
         <div className="card fade-in-up" style={{ marginBottom: "var(--spacing-lg)" }}>
-          <div style={{ textAlign: "center", marginBottom: "var(--spacing-xl)" }}>
+          <h3 style={{ marginBottom: "var(--spacing-md)", fontSize: "1.125rem", fontWeight: 600 }}>
+            Ingestion Progress
+          </h3>
+          <div style={{ marginBottom: "var(--spacing-sm)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--spacing-xs)" }}>
+              <span>{taskProgress.message || "Processing..."}</span>
+              <span>{taskProgress.progress.toFixed(1)}%</span>
+            </div>
             <div
               style={{
-                fontSize: "3rem",
-                marginBottom: "var(--spacing-md)",
-              }}
-            >
-              📂
-            </div>
-            <h3 style={{ marginBottom: "var(--spacing-sm)", fontSize: "1.25rem", fontWeight: 600 }}>
-              Connect Microsoft OneDrive
-            </h3>
-            <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem", marginBottom: "var(--spacing-lg)" }}>
-              Enter the OneDrive folder path to ingest documents
-            </p>
-          </div>
-
-          <div style={{ marginBottom: "var(--spacing-lg)" }}>
-            <label
-              style={{
-                display: "block",
-                marginBottom: "var(--spacing-sm)",
-                fontWeight: 500,
-                fontSize: "0.875rem",
-                color: "var(--text-primary)",
-              }}
-            >
-              Folder Path
-            </label>
-            <input
-              type="text"
-              value={oneDrivePath}
-              onChange={(e) => setOneDrivePath(e.target.value)}
-              placeholder="e.g., /Documents/MyFolder or /drive/root:/Documents"
-              disabled={oneDriveLoading}
-              className="input"
-              style={{
                 width: "100%",
-                padding: "var(--spacing-md)",
-                fontSize: "0.875rem",
-              }}
-            />
-            <p
-              style={{
-                marginTop: "var(--spacing-xs)",
-                fontSize: "0.75rem",
-                color: "var(--text-secondary)",
+                height: "8px",
+                background: "var(--gray-200)",
+                borderRadius: "var(--radius-full)",
+                overflow: "hidden",
               }}
             >
-              Enter the path to the folder you want to ingest from OneDrive
-            </p>
+              <div
+                style={{
+                  width: `${taskProgress.progress}%`,
+                  height: "100%",
+                  background: "var(--primary)",
+                  transition: "width 0.3s ease",
+                }}
+              />
+            </div>
           </div>
-
-          <button
-            onClick={handleOneDriveIngest}
-            disabled={oneDriveLoading || !oneDrivePath.trim()}
-            className="btn btn-primary"
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "var(--spacing-sm)",
-            }}
-          >
-            {oneDriveLoading ? (
-              <>
-                <div className="spinner" style={{ width: "1rem", height: "1rem" }} />
-                Connecting...
-              </>
-            ) : (
-              <>
-                <span>🔗</span>
-                Connect & Ingest
-              </>
-            )}
-          </button>
+          <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+            {taskProgress.processed_items} of {taskProgress.total_items} items processed
+          </div>
         </div>
       )}
 
@@ -485,16 +687,18 @@ const DocumentsPage = () => {
           className={`fade-in-down ${status.type === "success" ? "scale-in" : ""}`}
           style={{
             padding: "var(--spacing-md)",
-            background: status.type === "success" ? "#d1fae5" : "#fee2e2",
-            color: status.type === "success" ? "#065f46" : "#991b1b",
-            border: `1px solid ${status.type === "success" ? "#10b981" : "#ef4444"}`,
+            background: status.type === "success" ? "#d1fae5" : status.type === "info" ? "#dbeafe" : "#fee2e2",
+            color: status.type === "success" ? "#065f46" : status.type === "info" ? "#1e40af" : "#991b1b",
+            border: `1px solid ${status.type === "success" ? "#10b981" : status.type === "info" ? "#3b82f6" : "#ef4444"}`,
             borderRadius: "var(--radius-md)",
             display: "flex",
             alignItems: "center",
             gap: "var(--spacing-sm)",
           }}
         >
-          <span style={{ fontSize: "1.25rem" }}>{status.type === "success" ? "✓" : "✕"}</span>
+          <span style={{ fontSize: "1.25rem" }}>
+            {status.type === "success" ? "✓" : status.type === "info" ? "ℹ" : "✕"}
+          </span>
           <span>{status.message}</span>
         </div>
       )}

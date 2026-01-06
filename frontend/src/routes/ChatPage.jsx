@@ -10,6 +10,7 @@ const ChatPage = () => {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [queryType, setQueryType] = useState("file"); // "ask" or "file"
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -34,7 +35,7 @@ const ChatPage = () => {
     try {
       const res = await api.sendChatMessage({
         content: userMessage.content,
-        use_rag: true,
+        use_rag: queryType === "file", // Use RAG for "File query", not for "Ask"
       });
 
       const assistantContent =
@@ -49,6 +50,7 @@ const ChatPage = () => {
           role: "assistant",
           content: assistantContent,
           sources: res.sources || [],
+          queryType: queryType, // Store query type for display
           id: Date.now() + 1,
         },
       ]);
@@ -129,7 +131,9 @@ const ChatPage = () => {
           Chat Assistant
         </h1>
         <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
-          Ask questions about your documents. This uses your configured LLM and RAG pipeline.
+          {queryType === "ask"
+            ? "Ask general questions directly to the LLM without document search."
+            : "Ask questions about your documents using RAG (Retrieval-Augmented Generation)."}
         </p>
       </div>
 
@@ -215,6 +219,21 @@ const ChatPage = () => {
                     {m.role === "user" ? "You" : "Assistant"}
                   </div>
                   <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{m.content}</div>
+                  {m.queryType && (
+                    <div
+                      style={{
+                        marginTop: "var(--spacing-xs)",
+                        fontSize: "0.75rem",
+                        opacity: 0.7,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "var(--spacing-xs)",
+                      }}
+                    >
+                      <span>{m.queryType === "ask" ? "💬" : "📄"}</span>
+                      <span>{m.queryType === "ask" ? "Direct LLM Query" : "RAG Query"}</span>
+                    </div>
+                  )}
                   {m.sources && m.sources.length > 0 && (
                     <div
                       style={{
@@ -314,13 +333,13 @@ const ChatPage = () => {
         </div>
       )}
 
-      {/* Input Area */}
+      {/* Input Area with Integrated Query Type Selector */}
       <div
         className="fade-in-up"
         style={{
           display: "flex",
-          gap: "var(--spacing-md)",
-          alignItems: "flex-end",
+          flexDirection: "column",
+          gap: "var(--spacing-sm)",
           padding: "var(--spacing-md)",
           background: "var(--bg-primary)",
           borderRadius: "var(--radius-lg)",
@@ -330,12 +349,69 @@ const ChatPage = () => {
         onFocus={(e) => e.currentTarget.style.boxShadow = "var(--shadow-lg)"}
         onBlur={(e) => e.currentTarget.style.boxShadow = "var(--shadow-md)"}
       >
+        {/* Query Type Toggle Buttons */}
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--spacing-xs)",
+            padding: "4px",
+            background: "var(--gray-100)",
+            borderRadius: "var(--radius-md)",
+            width: "fit-content",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setQueryType("ask")}
+            style={{
+              padding: "var(--spacing-xs) var(--spacing-md)",
+              fontSize: "0.875rem",
+              fontWeight: 500,
+              border: "none",
+              borderRadius: "var(--radius-sm)",
+              cursor: "pointer",
+              transition: "all var(--transition-base)",
+              background: queryType === "ask" ? "var(--primary)" : "transparent",
+              color: queryType === "ask" ? "var(--text-inverse)" : "var(--text-secondary)",
+              boxShadow: queryType === "ask" ? "var(--shadow-sm)" : "none",
+            }}
+          >
+            💬 Ask
+          </button>
+          <button
+            type="button"
+            onClick={() => setQueryType("file")}
+            style={{
+              padding: "var(--spacing-xs) var(--spacing-md)",
+              fontSize: "0.875rem",
+              fontWeight: 500,
+              border: "none",
+              borderRadius: "var(--radius-sm)",
+              cursor: "pointer",
+              transition: "all var(--transition-base)",
+              background: queryType === "file" ? "var(--primary)" : "transparent",
+              color: queryType === "file" ? "var(--text-inverse)" : "var(--text-secondary)",
+              boxShadow: queryType === "file" ? "var(--shadow-sm)" : "none",
+            }}
+          >
+            📄 File Query
+          </button>
+        </div>
+
+        {/* Input Row */}
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--spacing-md)",
+            alignItems: "flex-end",
+          }}
+        >
         <textarea
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask a question about your documents..."
+          placeholder={queryType === "ask" ? "Ask a general question..." : "Ask a question about your documents..."}
           disabled={loading}
           rows={1}
           style={{
@@ -375,6 +451,7 @@ const ChatPage = () => {
             "Send"
           )}
         </button>
+        </div>
       </div>
     </div>
   );

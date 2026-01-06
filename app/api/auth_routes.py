@@ -20,7 +20,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.get("/login/google")
 async def google_login(request: Request):
     """Initiate Google OAuth login."""
-    redirect_uri = str(request.url_for("google_callback"))
+    # Use the configured redirect URI from settings to ensure consistency
+    redirect_uri = settings.google_redirect_uri
     auth_url, state = get_google_auth_url(redirect_uri, request=request)
     return RedirectResponse(url=auth_url)
 
@@ -57,7 +58,8 @@ async def google_callback(
 @router.get("/login/microsoft")
 async def microsoft_login(request: Request):
     """Initiate Microsoft OAuth login."""
-    redirect_uri = str(request.url_for("microsoft_callback"))
+    # Use the configured redirect URI from settings to ensure consistency
+    redirect_uri = settings.microsoft_redirect_uri
     auth_url, state = get_microsoft_auth_url(redirect_uri, request=request)
     return RedirectResponse(url=auth_url)
 

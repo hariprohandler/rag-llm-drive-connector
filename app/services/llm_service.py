@@ -71,9 +71,9 @@ def create_llm_config(
     """
     # If setting as default, unset other defaults
     if is_default:
-        db.query(models.LLMConfig).filter(
-            models.LLMConfig.user_id == user_id,
-            models.LLMConfig.is_default == True
+        db.query(LLMConfig).filter(
+            LLMConfig.user_id == user_id,
+            LLMConfig.is_default == True
         ).update({"is_default": False})
     
     encrypted_key = encrypt_api_key(api_key)
@@ -97,21 +97,23 @@ def create_llm_config(
     return llm_config
 
 
-def get_llm_configs(db: Session, user_id: str) -> List[LLMConfig]:
-    """Get all active LLM configurations for a user."""
-    return db.query(LLMConfig).filter(
-        LLMConfig.user_id == user_id,
-        LLMConfig.is_active == True
-    ).all()
+def get_llm_configs(db: Session, user_id: str, include_inactive: bool = False) -> List[LLMConfig]:
+    """Get all LLM configurations for a user."""
+    query = db.query(LLMConfig).filter(LLMConfig.user_id == user_id)
+    if not include_inactive:
+        query = query.filter(LLMConfig.is_active == True)
+    return query.order_by(LLMConfig.is_default.desc(), LLMConfig.created_at.desc()).all()
 
 
-def get_llm_config(db: Session, user_id: str, config_id: int) -> Optional[LLMConfig]:
+def get_llm_config(db: Session, user_id: str, config_id: int, include_inactive: bool = False) -> Optional[LLMConfig]:
     """Get a specific LLM configuration."""
-    return db.query(LLMConfig).filter(
+    query = db.query(LLMConfig).filter(
         LLMConfig.id == config_id,
-        LLMConfig.user_id == user_id,
-        LLMConfig.is_active == True
-    ).first()
+        LLMConfig.user_id == user_id
+    )
+    if not include_inactive:
+        query = query.filter(LLMConfig.is_active == True)
+    return query.first()
 
 
 def update_llm_config(
@@ -124,10 +126,11 @@ def update_llm_config(
     base_url: Optional[str] = None,
     temperature: Optional[str] = None,
     max_tokens: Optional[int] = None,
-    is_default: Optional[bool] = None
+    is_default: Optional[bool] = None,
+    is_active: Optional[bool] = None
 ) -> Optional[LLMConfig]:
     """Update an LLM configuration."""
-    config = get_llm_config(db, user_id, config_id)
+    config = get_llm_config(db, user_id, config_id, include_inactive=True)
     if not config:
         return None
     
@@ -152,6 +155,8 @@ def update_llm_config(
                 LLMConfig.id != config_id
             ).update({"is_default": False})
         config.is_default = is_default
+    if is_active is not None:
+        config.is_active = is_active
     
     db.commit()
     db.refresh(config)
@@ -160,12 +165,15 @@ def update_llm_config(
 
 
 def delete_llm_config(db: Session, user_id: str, config_id: int) -> bool:
-    """Soft delete an LLM configuration."""
-    config = get_llm_config(db, user_id, config_id)
+    """Soft delete an LLM configuration (set is_active to False)."""
+    config = get_llm_config(db, user_id, config_id, include_inactive=True)
     if not config:
         return False
     
     config.is_active = False
+    # If this was the default, unset it
+    if config.is_default:
+        config.is_default = False
     db.commit()
     
     return True

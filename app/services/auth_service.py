@@ -168,9 +168,10 @@ def get_or_create_user(
     user = db.query(User).filter(User.email == email).first()
     
     if user:
-        # Update user info
+        # Update user info (always update picture if provided, even if user already has one)
         user.name = name or user.name
-        user.picture = picture or user.picture
+        if picture:  # Always update picture if provided from OAuth
+            user.picture = picture
         user.provider = provider
         user.provider_id = provider_id
         user.updated_at = datetime.utcnow()

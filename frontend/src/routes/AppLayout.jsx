@@ -114,13 +114,73 @@ const AppLayout = () => {
                 gap: "var(--spacing-sm)",
               }}
             >
+              {user.picture ? (
+                <>
+                  <img
+                    src={user.picture}
+                    alt="Profile"
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                      border: "2px solid var(--gray-600)",
+                      display: "inline-block",
+                    }}
+                    onError={(e) => {
+                      // Hide image and show fallback on error (429, 404, etc.)
+                      e.target.style.display = "none";
+                      const fallback = e.target.parentElement?.querySelector('.profile-fallback');
+                      if (fallback) {
+                        fallback.style.display = "inline-block";
+                      }
+                    }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span
+                    className="profile-fallback"
+                    style={{
+                      width: "32px",
+                      height: "32px",
+                      borderRadius: "50%",
+                      background: "var(--gray-600)",
+                      display: "none",
+                      fontSize: "0.75rem",
+                      color: "var(--text-inverse)",
+                      lineHeight: "32px",
+                      textAlign: "center",
+                      fontWeight: 600,
+                    }}
+                  >
+                    {user.name ? user.name.charAt(0).toUpperCase() : "U"}
+                  </span>
+                </>
+              ) : (
+                <span
+                  style={{
+                    width: "32px",
+                    height: "32px",
+                    borderRadius: "50%",
+                    background: "var(--gray-600)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "0.75rem",
+                    color: "var(--text-inverse)",
+                    fontWeight: 600,
+                  }}
+                >
+                  {user.name ? user.name.charAt(0).toUpperCase() : "U"}
+                </span>
+              )}
               <span
                 style={{
                   width: "8px",
                   height: "8px",
                   borderRadius: "50%",
                   background: "var(--success)",
-                  display: "inline-block",
+                  display: user.picture ? "none" : "inline-block",
                 }}
               />
               {(() => {

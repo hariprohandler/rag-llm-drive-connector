@@ -34,6 +34,7 @@ class LLMConfigUpdateRequest(BaseModel):
     temperature: Optional[str] = None
     max_tokens: Optional[int] = None
     is_default: Optional[bool] = None
+    is_active: Optional[bool] = None
 
 
 router = APIRouter(prefix="/api/llm-configs", tags=["llm-configs"])
@@ -65,11 +66,12 @@ async def create_llm_config_endpoint(
 
 @router.get("")
 async def list_llm_configs(
+    include_inactive: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get all LLM configurations for the current user."""
-    configs = get_llm_configs(db, current_user.id)
+    configs = get_llm_configs(db, current_user.id, include_inactive=include_inactive)
     return [config.to_dict() for config in configs]
 
 
@@ -105,6 +107,7 @@ async def update_llm_config_endpoint(
         temperature=request.temperature,
         max_tokens=request.max_tokens,
         is_default=request.is_default,
+        is_active=request.is_active,
     )
     if not config_obj:
         raise HTTPException(status_code=404, detail="LLM configuration not found")

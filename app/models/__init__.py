@@ -5,6 +5,7 @@ from app.models.llm_config import LLMConfig
 from app.models.knowledge_base import KnowledgeBase
 from app.models.chat import ChatConversation, ChatMessage
 from app.models.user_settings import UserSettings
+from app.models.oauth_credentials import OAuthCredentials
 
 __all__ = [
     "Base",
@@ -14,5 +15,6 @@ __all__ = [
     "ChatConversation",
     "ChatMessage",
     "UserSettings",
+    "OAuthCredentials",
 ]
 

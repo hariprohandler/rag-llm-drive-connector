@@ -56,12 +56,21 @@ const SettingsPage = () => {
   const loadConfigs = async () => {
     try {
       setLoading(true);
-      const data = await api.listLLMConfigs();
+      const data = await api.listLLMConfigs(true); // Include inactive configs
       setConfigs(data);
     } catch (e) {
       console.error("Failed to load configs:", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleActive = async (configId, currentStatus) => {
+    try {
+      await api.toggleLLMConfigActive(configId, !currentStatus);
+      await loadConfigs();
+    } catch (e) {
+      alert(`Error: ${e.message}`);
     }
   };
 
@@ -399,38 +408,60 @@ const SettingsPage = () => {
 
           {/* Existing Configurations */}
           <div className="card fade-in-up">
-            <h2
-              style={{
-                fontSize: "1.25rem",
-                fontWeight: 600,
-                marginBottom: "var(--spacing-lg)",
-                color: "var(--text-primary)",
-              }}
-            >
-              Existing Configurations
-            </h2>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-lg)" }}>
+              <h2
+                style={{
+                  fontSize: "1.25rem",
+                  fontWeight: 600,
+                  color: "var(--text-primary)",
+                }}
+              >
+                LLM Configurations
+              </h2>
+              <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                {configs.filter(c => c.is_active).length} active, {configs.filter(c => !c.is_active).length} inactive
+              </div>
+            </div>
             {configs.length === 0 ? (
               <p style={{ color: "var(--text-secondary)" }}>No configurations yet. Create one above.</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-sm)" }}>
                 {configs.map((c, i) => (
-                  <div
-                    key={c.id}
-                    className="fade-in-up hover-lift"
-                    style={{
-                      padding: "var(--spacing-md)",
-                      background: "var(--gray-50)",
-                      borderRadius: "var(--radius-md)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      animationDelay: `${i * 0.1}s`,
-                      transition: "all var(--transition-base)",
-                    }}
-                  >
+                    <div
+                      key={c.id}
+                      className="fade-in-up hover-lift"
+                      style={{
+                        padding: "var(--spacing-md)",
+                        background: c.is_active ? "var(--gray-50)" : "var(--gray-100)",
+                        borderRadius: "var(--radius-md)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        animationDelay: `${i * 0.1}s`,
+                        transition: "all var(--transition-base)",
+                        opacity: c.is_active ? 1 : 0.7,
+                        border: `1px solid ${c.is_active ? "var(--gray-200)" : "var(--gray-300)"}`,
+                      }}
+                    >
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, marginBottom: "var(--spacing-xs)" }}>
-                        {providerConfigs[c.provider]?.name || c.provider} – {c.model_name || "default"}
+                      <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", marginBottom: "var(--spacing-xs)" }}>
+                        <div style={{ fontWeight: 600 }}>
+                          {providerConfigs[c.provider]?.name || c.provider} – {c.model_name || "default"}
+                        </div>
+                        {!c.is_active && (
+                          <span
+                            style={{
+                              padding: "2px var(--spacing-xs)",
+                              background: "var(--gray-300)",
+                              color: "var(--text-secondary)",
+                              borderRadius: "var(--radius-full)",
+                              fontSize: "0.75rem",
+                              fontWeight: 500,
+                            }}
+                          >
+                            Inactive
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
                         ID: {c.id} • Temperature: {c.temperature || "0"}
@@ -438,7 +469,7 @@ const SettingsPage = () => {
                         {c.base_url && ` • Base URL: ${c.base_url}`}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-md)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)" }}>
                       {c.is_default && (
                         <span
                           className="pulse-notification"
@@ -455,9 +486,23 @@ const SettingsPage = () => {
                         </span>
                       )}
                       <button
+                        onClick={() => handleToggleActive(c.id, c.is_active)}
+                        className="btn"
+                        style={{
+                          padding: "var(--spacing-xs) var(--spacing-md)",
+                          fontSize: "0.875rem",
+                          background: c.is_active ? "var(--warning)" : "var(--success)",
+                          color: "var(--text-inverse)",
+                        }}
+                        title={c.is_active ? "Deactivate" : "Activate"}
+                      >
+                        {c.is_active ? "⏸ Deactivate" : "▶ Activate"}
+                      </button>
+                      <button
                         onClick={() => handleEdit(c)}
                         className="btn btn-secondary"
                         style={{ padding: "var(--spacing-xs) var(--spacing-md)", fontSize: "0.875rem" }}
+                        disabled={!c.is_active && !editingId}
                       >
                         Edit
                       </button>

@@ -51,7 +51,7 @@ def get_google_oauth_flow(redirect_uri: str) -> Flow:
     return flow
 
 
-def get_google_auth_url(redirect_uri: str, request: Optional[Request] = None) -> Tuple[str, str]:
+def get_google_auth_url(redirect_uri: str, request: Optional[Request] = None, user_id: Optional[str] = None) -> Tuple[str, str]:
     """Get Google OAuth authorization URL and state."""
     flow = get_google_oauth_flow(redirect_uri)
     
@@ -64,8 +64,12 @@ def get_google_auth_url(redirect_uri: str, request: Optional[Request] = None) ->
         state=state
     )
     
-    # Store state
-    oauth_states[state] = {"provider": "google", "redirect_uri": redirect_uri}
+    # Store state with user_id to ensure credentials are associated with the correct user
+    oauth_states[state] = {
+        "provider": "google", 
+        "redirect_uri": redirect_uri,
+        "user_id": user_id  # Store user_id to verify on callback
+    }
     
     # Log OAuth initiation
     logger = get_logger()
@@ -164,7 +168,7 @@ def handle_google_callback(code: str, state: str, db: Session, request: Optional
         raise
 
 
-def get_microsoft_auth_url(redirect_uri: str, request: Optional[Request] = None) -> Tuple[str, str]:
+def get_microsoft_auth_url(redirect_uri: str, request: Optional[Request] = None, user_id: Optional[str] = None) -> Tuple[str, str]:
     """Get Microsoft OAuth authorization URL."""
     if not config.settings.microsoft_client_id or not config.settings.microsoft_tenant_id:
         raise HTTPException(
@@ -174,7 +178,11 @@ def get_microsoft_auth_url(redirect_uri: str, request: Optional[Request] = None)
     
     # Generate state
     state = secrets.token_urlsafe(32)
-    oauth_states[state] = {"provider": "microsoft", "redirect_uri": redirect_uri}
+    oauth_states[state] = {
+        "provider": "microsoft", 
+        "redirect_uri": redirect_uri,
+        "user_id": user_id  # Store user_id to verify on callback
+    }
     
     authority = f"https://login.microsoftonline.com/{config.settings.microsoft_tenant_id}"
     scopes = [

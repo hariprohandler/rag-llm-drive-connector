@@ -34,11 +34,13 @@ export const api = {
   me: () => request("/auth/me"),
   sendChatMessage: (body) =>
     request("/api/chat/messages", { method: "POST", body: JSON.stringify(body) }),
-  listLLMConfigs: () => request("/api/llm-configs"),
+  listLLMConfigs: (includeInactive = true) => request(`/api/llm-configs?include_inactive=${includeInactive}`),
   createLLMConfig: (body) =>
     request("/api/llm-configs", { method: "POST", body: JSON.stringify(body) }),
   updateLLMConfig: (configId, body) =>
     request(`/api/llm-configs/${configId}`, { method: "PUT", body: JSON.stringify(body) }),
+  toggleLLMConfigActive: (configId, isActive) =>
+    request(`/api/llm-configs/${configId}`, { method: "PUT", body: JSON.stringify({ is_active: isActive }) }),
   deleteLLMConfig: (configId) =>
     request(`/api/llm-configs/${configId}`, { method: "DELETE" }),
   getOrganizationSettings: () => request("/api/settings/organization"),
@@ -48,6 +50,29 @@ export const api = {
     request("/api/ingest/google-drive", { method: "POST", body: JSON.stringify(body) }),
   ingestOneDrive: (body) =>
     request("/api/ingest/onedrive", { method: "POST", body: JSON.stringify(body) }),
+  // Drive connection and file browsing
+  connectGoogleDrive: () => window.location.href = `${BACKEND_BASE_URL}/api/drive/connect/google`,
+  connectMicrosoftOneDrive: () => window.location.href = `${BACKEND_BASE_URL}/api/drive/connect/microsoft`,
+  checkGoogleDriveStatus: () => request("/api/drive/status/google"),
+  checkMicrosoftOneDriveStatus: () => request("/api/drive/status/microsoft"),
+  listGoogleFiles: (folderId, pageToken) => {
+    const params = new URLSearchParams();
+    if (folderId) params.append("folder_id", folderId);
+    if (pageToken) params.append("page_token", pageToken);
+    return request(`/api/drive/files/google?${params.toString()}`);
+  },
+  listMicrosoftFiles: (folderPath, pageToken) => {
+    const params = new URLSearchParams();
+    params.append("folder_path", folderPath || "/");
+    if (pageToken) params.append("page_token", pageToken);
+    return request(`/api/drive/files/microsoft?${params.toString()}`);
+  },
+  startGoogleIngestion: (body) =>
+    request("/api/drive/ingest/google", { method: "POST", body: JSON.stringify(body) }),
+  startMicrosoftIngestion: (body) =>
+    request("/api/drive/ingest/microsoft", { method: "POST", body: JSON.stringify(body) }),
+  getIngestionTaskStatus: (taskId) =>
+    request(`/api/drive/task/${taskId}`),
 };
 
 
