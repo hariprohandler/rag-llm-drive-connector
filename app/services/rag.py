@@ -61,12 +61,47 @@ def get_llm_from_config(llm_config: LLMConfig) -> BaseChatModel:
         )
     elif provider == "custom":
         # For custom hosted LLMs, use OpenAI-compatible interface
+        # Normalize base_url for Ollama and similar services
+        base_url = llm_config.base_url
+        if base_url:
+            # Clean up the base URL
+            base_url = base_url.strip().rstrip("/")
+            
+            # If base_url ends with /api/chat, convert to /v1 format for OpenAI-compatible API
+            # LangChain's ChatOpenAI expects base_url to be the base (e.g., http://localhost:11434/v1)
+            # and will append /chat/completions automatically
+            if base_url.endswith("/api/chat"):
+                # Convert http://localhost:11434/api/chat to http://localhost:11434/v1
+                base_url = base_url.replace("/api/chat", "/v1")
+            elif base_url.endswith("/api/chat/"):
+                base_url = base_url.replace("/api/chat/", "/v1")
+            elif not base_url.endswith("/v1") and not base_url.endswith("/v1/"):
+                # If it's just the base URL without /v1, add it
+                # e.g., http://localhost:11434 -> http://localhost:11434/v1
+                base_url = base_url + "/v1"
+        else:
+            # Default to Ollama if no base_url provided
+            base_url = "http://localhost:11434/v1"
+        
+        # For Ollama, API key is often optional, but LangChain may require it
+        # Use a dummy key if not provided or if it's empty
+        # Note: api_key here is already decrypted (or empty string if decryption failed)
+        api_key = llm_config.api_key
+        if not api_key or api_key.strip() == "":
+            api_key = "ollama"  # Dummy key for Ollama (not actually used)
+        
+        # For Ollama, the model name should match the actual model name (e.g., "llama3", "llama2", "mistral")
+        # If model_name is not provided or is "custom", try to use a sensible default
+        if not model_name or model_name.lower() == "custom":
+            model_name = "llama3"  # Default Ollama model
+        
         return ChatOpenAI(
-            model=model_name or "gpt-3.5-turbo",
+            model=model_name,
             temperature=temperature,
-            openai_api_key=llm_config.api_key,
-            base_url=llm_config.base_url,
-            max_tokens=llm_config.max_tokens
+            openai_api_key=api_key,
+            base_url=base_url,
+            max_tokens=llm_config.max_tokens,
+            timeout=60.0  # Increase timeout for local models
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
@@ -212,7 +247,27 @@ def ask_question(
         else:
             from app.services.llm_service import decrypt_api_key
             # Decrypt API key for use
-            decrypted_key = decrypt_api_key(llm_config.api_key)
+            decrypted_key = ""
+            try:
+                if llm_config.api_key:
+                    decrypted_key = decrypt_api_key(llm_config.api_key)
+            except (ValueError, Exception) as decrypt_error:
+                # If decryption fails (e.g., encryption key changed)
+                error_msg = str(decrypt_error)
+                print(f"Warning: Failed to decrypt API key: {error_msg}")
+                
+                # For custom/self-hosted LLMs (like Ollama), API key is optional
+                if llm_config.provider == "custom":
+                    decrypted_key = ""  # Ollama doesn't require API key, use empty string
+                    print("Using empty API key for custom/self-hosted LLM (Ollama)")
+                else:
+                    # For other providers (OpenAI, Gemini, Anthropic), API key is required
+                    raise ValueError(
+                        f"Failed to decrypt API key for {llm_config.provider}. "
+                        f"This may happen if the encryption key changed. "
+                        f"Please update your LLM configuration with a new API key. "
+                        f"Original error: {error_msg}"
+                    )
             # Create a temporary config with decrypted key
             import copy
             temp_config = copy.copy(llm_config)
@@ -298,18 +353,28 @@ def ask_question(
             "use_rag": use_rag
         }
     except Exception as e:
+        import traceback
         response_time_ms = (time.time() - start_time) * 1000
         
-        # Log failed query
+        # Get full error details
+        error_message = str(e)
+        error_traceback = traceback.format_exc()
+        
+        # Log failed query with full details
+        print(f"RAG Error: {error_message}")
+        print(f"RAG Traceback: {error_traceback}")
+        
         logger.log_query_activity(
             query=query,
             user_id=user_id,
             collection_name=collection_name if use_rag else None,
             status="failure",
-            error=str(e),
+            error=error_message,
             ip_address=get_client_ip(request) if request else None,
             user_agent=get_user_agent(request) if request else None,
             response_time_ms=response_time_ms,
             tracing_id=get_tracing_id(request) if request else None
         )
-        raise
+        
+        # Re-raise with more context
+        raise Exception(f"RAG query failed: {error_message}") from e

@@ -12,6 +12,7 @@ const SkeletonLoader = () => (
 const SettingsPage = () => {
   const [configs, setConfigs] = useState([]);
   const [selectedProvider, setSelectedProvider] = useState("openai");
+  const [configName, setConfigName] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [modelName, setModelName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -46,8 +47,8 @@ const SettingsPage = () => {
     },
     custom: {
       name: "Self-Hosted / Custom",
-      models: ["llama-2", "llama-3", "mistral", "custom"],
-      defaultModel: "custom",
+      models: ["llama3", "llama3.1", "llama2", "mistral", "mixtral", "phi3", "neural-chat", "starling-lm", "codellama", "custom"],
+      defaultModel: "llama3",
       requiresApiKey: false,
       requiresBaseUrl: true,
     },
@@ -86,6 +87,7 @@ const SettingsPage = () => {
   }, [selectedProvider]);
 
   const resetForm = () => {
+    setConfigName("");
     setApiKey("");
     setModelName("");
     setBaseUrl("");
@@ -102,6 +104,7 @@ const SettingsPage = () => {
   const handleEdit = (config) => {
     setEditingId(config.id);
     setSelectedProvider(config.provider);
+    setConfigName(config.config_name || "");
     setApiKey(config.api_key ? "••••••••" : "");
     setModelName(config.model_name || "");
     setBaseUrl(config.base_url || "");
@@ -129,6 +132,7 @@ const SettingsPage = () => {
     try {
       const configData = {
         provider: selectedProvider,
+        config_name: configName.trim() || undefined,
         api_key: apiKey === "••••••••" ? undefined : apiKey,
         model_name: modelName,
         base_url: baseUrl || undefined,
@@ -211,6 +215,30 @@ const SettingsPage = () => {
                     color: "var(--text-primary)",
                   }}
                 >
+                  Configuration Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={configName}
+                  onChange={(e) => setConfigName(e.target.value)}
+                  className="input"
+                  placeholder="e.g., My Local Llama, Production GPT-4"
+                />
+                <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "var(--spacing-xs)" }}>
+                  A friendly name to identify this configuration
+                </p>
+              </div>
+
+              <div>
+                <label
+                  style={{
+                    display: "block",
+                    marginBottom: "var(--spacing-xs)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                  }}
+                >
                   Provider
                 </label>
                 <select
@@ -274,10 +302,11 @@ const SettingsPage = () => {
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                     className="input"
-                    placeholder="http://localhost:8000/v1 or https://your-llm-server.com/v1"
+                    placeholder="http://localhost:11434 or http://host.docker.internal:11434"
                   />
                   <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "var(--spacing-xs)" }}>
-                    For self-hosted models (Llama, Mistral, etc.), provide the API endpoint URL
+                    For self-hosted models (Ollama, Llama, etc.). 
+                    <strong> If running in Docker:</strong> Use <code>host.docker.internal:11434</code> instead of <code>localhost:11434</code>
                   </p>
                 </div>
               )}
@@ -446,8 +475,13 @@ const SettingsPage = () => {
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-sm)", marginBottom: "var(--spacing-xs)" }}>
                         <div style={{ fontWeight: 600 }}>
-                          {providerConfigs[c.provider]?.name || c.provider} – {c.model_name || "default"}
+                          {c.config_name || `${providerConfigs[c.provider]?.name || c.provider} – ${c.model_name || "default"}`}
                         </div>
+                        {c.config_name && (
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: 400 }}>
+                            ({providerConfigs[c.provider]?.name || c.provider} – {c.model_name || "default"})
+                          </span>
+                        )}
                         {!c.is_active && (
                           <span
                             style={{

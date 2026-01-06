@@ -36,9 +36,22 @@ def encrypt_api_key(api_key: str) -> str:
 
 
 def decrypt_api_key(encrypted_key: str) -> str:
-    """Decrypt an API key."""
-    f = Fernet(get_encryption_key())
-    return f.decrypt(encrypted_key.encode()).decode()
+    """
+    Decrypt an API key.
+    
+    If decryption fails, raises an exception. The caller should handle this
+    appropriately (e.g., for custom/self-hosted LLMs that don't require API keys).
+    """
+    if not encrypted_key:
+        return ""
+    
+    try:
+        f = Fernet(get_encryption_key())
+        return f.decrypt(encrypted_key.encode()).decode()
+    except Exception as e:
+        # Re-raise the error - let the caller decide how to handle it
+        # For custom providers (Ollama), the caller can use an empty string
+        raise ValueError(f"Failed to decrypt API key: {str(e)}")
 
 
 def create_llm_config(
@@ -50,7 +63,8 @@ def create_llm_config(
     base_url: Optional[str] = None,
     temperature: Optional[str] = "0",
     max_tokens: Optional[int] = None,
-    is_default: bool = False
+    is_default: bool = False,
+    config_name: Optional[str] = None
 ) -> LLMConfig:
     """
     Create a new LLM configuration for a user.
@@ -65,6 +79,7 @@ def create_llm_config(
         temperature: Temperature setting
         max_tokens: Maximum tokens
         is_default: Whether this should be the default config
+        config_name: Optional user-friendly name for the configuration
         
     Returns:
         Created LLMConfig instance
@@ -80,6 +95,7 @@ def create_llm_config(
     
     llm_config = LLMConfig(
         user_id=user_id,
+        config_name=config_name,
         provider=provider,
         api_key=encrypted_key,
         model_name=model_name,
@@ -127,7 +143,8 @@ def update_llm_config(
     temperature: Optional[str] = None,
     max_tokens: Optional[int] = None,
     is_default: Optional[bool] = None,
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = None,
+    config_name: Optional[str] = None
 ) -> Optional[LLMConfig]:
     """Update an LLM configuration."""
     config = get_llm_config(db, user_id, config_id, include_inactive=True)
@@ -138,6 +155,8 @@ def update_llm_config(
         config.provider = provider
     if api_key is not None:
         config.api_key = encrypt_api_key(api_key)
+    if config_name is not None:
+        config.config_name = config_name
     if model_name is not None:
         config.model_name = model_name
     if base_url is not None:

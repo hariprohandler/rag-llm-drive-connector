@@ -24,6 +24,7 @@ class LLMConfigRequest(BaseModel):
     temperature: Optional[str] = "0"
     max_tokens: Optional[int] = None
     is_default: bool = False
+    config_name: Optional[str] = None  # User-friendly name for the configuration
 
 
 class LLMConfigUpdateRequest(BaseModel):
@@ -35,6 +36,7 @@ class LLMConfigUpdateRequest(BaseModel):
     max_tokens: Optional[int] = None
     is_default: Optional[bool] = None
     is_active: Optional[bool] = None
+    config_name: Optional[str] = None
 
 
 router = APIRouter(prefix="/api/llm-configs", tags=["llm-configs"])
@@ -58,6 +60,7 @@ async def create_llm_config_endpoint(
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             is_default=request.is_default,
+            config_name=request.config_name,
         )
         return config_obj.to_dict()
     except Exception as e:
@@ -108,6 +111,7 @@ async def update_llm_config_endpoint(
         max_tokens=request.max_tokens,
         is_default=request.is_default,
         is_active=request.is_active,
+        config_name=request.config_name,
     )
     if not config_obj:
         raise HTTPException(status_code=404, detail="LLM configuration not found")
