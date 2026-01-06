@@ -661,105 +661,414 @@ async def readiness_check():
         raise HTTPException(status_code=503, detail="Service not ready")
 
 
-# Gradio UI with authentication
-def gradio_query(query: str, token: str = ""):
-    """Gradio interface for querying (requires token)."""
-    if not token:
-        return "Please login first. Use the login buttons above."
+# Gradio UI with modern design matching screenshots
+def get_user_info(user_id: str, db: Session):
+    """Get user information for display."""
+    from app.models import User
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        provider_name = user.provider.capitalize() if user.provider else "Demo"
+        return f"{user.name or 'Demo User'} ({provider_name})"
+    return "Demo User (Google)"
+
+
+def get_document_count(user_id: str, db: Session):
+    """Get total document count for user."""
+    from app.models import KnowledgeBase
+    total = db.query(KnowledgeBase).filter(
+        KnowledgeBase.user_id == user_id,
+        KnowledgeBase.is_active == True
+    ).count()
+    return total
+
+
+def get_default_model_name(user_id: str, db: Session):
+    """Get default model name for user."""
+    from app.services.llm_service import get_llm_configs
+    configs = get_llm_configs(db, user_id)
+    default_config = next((c for c in configs if c.is_default), None)
+    if default_config:
+        return f"{default_config.provider.capitalize()} - {default_config.model_name or 'default'}"
+    return "Default model"
+
+
+def update_status_text(user_state, db):
+    """Update status text with current document count and model."""
+    if not user_state or not user_state.get("authenticated"):
+        return "Ask questions about your documents • 0 document(s) loaded • Using default model"
     
-    if not query.strip():
-        return "Please enter a question."
+    user_id = user_state.get("user_id")
+    if not user_id:
+        return "Ask questions about your documents • 0 document(s) loaded • Using default model"
     
     try:
-        # Verify token and get user
-        from auth_service import verify_token
-        payload = verify_token(token)
-        user_id = payload.get("sub")
-        
-        # Create database session for Gradio
-        db = next(get_db())
-        try:
-            result = ask_question(
-                query=query,
-                user_id=user_id,
-                db=db,
-                use_rag=True
-            )
-            answer = result.get("answer", "No answer generated")
-            sources = result.get("sources", [])
-            
-            if sources:
-                answer += "\n\n**Sources:**\n"
-                for i, source in enumerate(sources, 1):
-                    answer += f"\n{i}. {source.get('metadata', {}).get('file_name', 'Unknown')}\n"
-            
-            return answer
-        finally:
-            db.close()
-    except Exception as e:
-        return f"Error: {str(e)}. Please check your token."
+        doc_count = get_document_count(user_id, db)
+        model_name = get_default_model_name(user_id, db)
+        return f"Ask questions about your documents • {doc_count} document(s) loaded • Using {model_name}"
+    except:
+        return "Ask questions about your documents • 0 document(s) loaded • Using default model"
 
 
 def create_gradio_interface():
-    """Create and return Gradio interface with authentication."""
-    with gr.Blocks(title="RAG Drive Connector") as demo:
-        gr.Markdown("# 📄 RAG LLM Drive Connector")
-        gr.Markdown("🔒 **Authentication Required** - Please login to access your documents")
+    """Create modern Gradio interface matching the screenshots."""
+    
+    # Custom CSS for modern design matching screenshots
+    custom_css = """
+    .gradio-container {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .main-container {
+        background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+        min-height: 100vh;
+        padding: 20px;
+    }
+    .login-card {
+        background: white;
+        border-radius: 16px;
+        padding: 50px 40px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        max-width: 450px;
+        margin: 50px auto;
+        text-align: center;
+    }
+    .logo-container {
+        width: 100px;
+        height: 100px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 30px;
+        font-size: 48px;
+    }
+    .sidebar-dark {
+        background: linear-gradient(180deg, #1a1a1a 0%, #2d2d2d 100%);
+        color: white;
+        padding: 20px;
+        min-height: 100vh;
+    }
+    .main-content-light {
+        background: #f5f5f5;
+        padding: 30px;
+        min-height: 100vh;
+    }
+    .demo-mode-text {
+        color: #666;
+        font-size: 14px;
+        margin-top: 20px;
+    }
+    .status-text {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 20px;
+    }
+    """
+    
+    with gr.Blocks(title="RAG Chat Platform", theme=gr.themes.Soft(), css=custom_css) as demo:
+        # State to track authentication and user info
+        user_state = gr.State(value={"authenticated": False, "user_id": None, "token": None})
+        current_page = gr.State(value="login")  # login, chat, documents, settings
         
-        with gr.Row():
-            with gr.Column():
-                gr.Markdown("### 🔐 Authentication")
-                with gr.Row():
-                    google_login_btn = gr.Button("🔗 Login with Google", variant="primary")
-                    microsoft_login_btn = gr.Button("🔗 Login with Microsoft", variant="primary")
+        # Login Page
+        with gr.Column(visible=True, elem_classes="main-container") as login_page:
+            with gr.Column(elem_classes="login-card"):
+                gr.HTML("""
+                    <div class="logo-container">🧠</div>
+                """)
                 
-                token_input = gr.Textbox(
-                    label="Access Token",
-                    type="password",
-                    placeholder="Enter your access token (from OAuth callback)",
-                    visible=False
+                gr.Markdown(
+                    "# RAG Chat Platform\n\n"
+                    "Sign in to access your intelligent document assistant",
+                    elem_id="login-title"
                 )
                 
-                gr.Markdown("### 📥 Ingest Documents")
-                with gr.Column():
-                    file_upload = gr.File(
-                        label="Upload Files",
-                        file_count="multiple"
+                with gr.Row():
+                    google_btn = gr.Button(
+                        "Continue with Google",
+                        variant="secondary",
+                        size="lg",
+                        scale=1
                     )
-                    ingest_files_btn = gr.Button("📥 Ingest Files")
                 
-                gr.Markdown("**Note:** Drive ingestion requires credential storage setup")
+                with gr.Row():
+                    microsoft_btn = gr.Button(
+                        "Continue with Microsoft",
+                        variant="secondary",
+                        size="lg",
+                        scale=1
+                    )
         
-        gr.Markdown("### ❓ Ask Questions")
-        with gr.Row():
-            query_input = gr.Textbox(
-                label="Your Question",
-                placeholder="Ask anything about your documents...",
-                lines=3
+        # Main Application (hidden initially)
+        with gr.Row(visible=False) as main_app:
+            # Left Sidebar
+            with gr.Column(scale=1, min_width=250, elem_classes="sidebar-dark") as sidebar:
+                gr.Markdown("### RAG Chat Platform", elem_id="sidebar-title")
+                user_display = gr.Markdown("Demo User (Google)", elem_id="user-info")
+                
+                chat_btn = gr.Button("💬 Chat", variant="primary", size="lg")
+                documents_btn = gr.Button("📄 Documents", variant="secondary", size="lg")
+                settings_btn = gr.Button("⚙️ LLM Settings", variant="secondary", size="lg")
+                
+                gr.Markdown("---")
+                logout_btn = gr.Button("Logout", variant="stop", size="sm")
+            
+            # Main Content Area
+            with gr.Column(scale=4, elem_classes="main-content-light") as main_content:
+                # Chat Page
+                with gr.Column(visible=True) as chat_page:
+                    gr.Markdown("# Chat Assistant", elem_id="page-title")
+                    status_text = gr.Markdown(
+                        "Ask questions about your documents • 0 document(s) loaded • Using default model",
+                        elem_classes="status-text"
+                    )
+                    
+                    # Empty state message
+                    empty_state = gr.Markdown(
+                        "### 🧠\n\n**Start a conversation**\n\nUpload documents first to enable RAG-based queries.",
+                        visible=True,
+                        elem_id="empty-state"
+                    )
+                    
+                    chat_history = gr.Chatbot(
+                        label="",
+                        height=500,
+                        show_label=False,
+                        container=True,
+                        visible=False
+                    )
+                    
+                    with gr.Row():
+                        query_input = gr.Textbox(
+                            placeholder="Ask a question about your documents...",
+                            show_label=False,
+                            scale=9,
+                            container=False
+                        )
+                        send_btn = gr.Button("➤", variant="primary", scale=1, size="sm")
+                
+                # Documents Page
+                with gr.Column(visible=False) as documents_page:
+                    gr.Markdown("# Document Management", elem_id="page-title")
+                    gr.Markdown("Upload and manage documents for RAG-based queries.")
+                    
+                    doc_tabs = gr.Tabs(selected=0)
+                    with doc_tabs:
+                        with gr.Tab("Local Upload"):
+                            gr.Markdown("### Upload Local Files")
+                            gr.Markdown("Upload documents from your computer (PDF, TXT, DOCX, MD).")
+                            
+                            file_upload = gr.File(
+                                label="",
+                                file_count="multiple",
+                                file_types=[".pdf", ".txt", ".docx", ".md"],
+                                height=300,
+                                show_label=False
+                            )
+                            
+                            upload_status = gr.Markdown("", visible=False)
+                            gr.Markdown("Supported formats: PDF, TXT, DOCX, MD")
+                        
+                        with gr.Tab("Google Drive"):
+                            gr.Markdown("### Connect Google Drive")
+                            gr.Markdown("Connect your Google Drive to import documents.")
+                            drive_folder_input = gr.Textbox(
+                                label="Folder ID (optional - leave empty for root)",
+                                placeholder="Enter Google Drive folder ID"
+                            )
+                            connect_drive_btn = gr.Button("Connect Google Drive", variant="primary")
+                        
+                        with gr.Tab("OneDrive"):
+                            gr.Markdown("### Connect OneDrive")
+                            gr.Markdown("Connect your OneDrive to import documents.")
+                            onedrive_path_input = gr.Textbox(
+                                label="Folder Path",
+                                placeholder="/Documents/MyFolder"
+                            )
+                            connect_onedrive_btn = gr.Button("Connect OneDrive", variant="primary")
+                
+                # LLM Settings Page
+                with gr.Column(visible=False) as settings_page:
+                    gr.Markdown("# LLM Configuration", elem_id="page-title")
+                    gr.Markdown("Configure your language model provider and settings.")
+                    
+                    save_status = gr.Markdown("", visible=False)
+                    
+                    llm_tabs = gr.Tabs(selected=0)
+                    with llm_tabs:
+                        with gr.Tab("Default"):
+                            gr.Markdown("### Default Configuration")
+                            gr.Markdown(
+                                "Use the platform's default LLM configuration (demo mode)\n\n"
+                                "The default configuration uses a simulated LLM for demonstration purposes. No API keys required."
+                            )
+                        
+                        with gr.Tab("OpenAI"):
+                            gr.Markdown("### OpenAI Configuration")
+                            openai_api_key = gr.Textbox(
+                                label="API Key",
+                                type="password",
+                                placeholder="sk-..."
+                            )
+                            openai_model = gr.Dropdown(
+                                choices=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+                                label="Model",
+                                value="gpt-4o-mini"
+                            )
+                            openai_temp = gr.Slider(0, 2, value=0, step=0.1, label="Temperature")
+                            openai_save = gr.Button("Save Configuration", variant="primary")
+                        
+                        with gr.Tab("Gemini"):
+                            gr.Markdown("### Google Gemini Configuration")
+                            gemini_api_key = gr.Textbox(
+                                label="API Key",
+                                type="password"
+                            )
+                            gemini_model = gr.Dropdown(
+                                choices=["gemini-pro", "gemini-pro-vision"],
+                                label="Model",
+                                value="gemini-pro"
+                            )
+                            gemini_save = gr.Button("Save Configuration", variant="primary")
+                        
+                        with gr.Tab("Anthropic"):
+                            gr.Markdown("### Anthropic Claude Configuration")
+                            anthropic_api_key = gr.Textbox(
+                                label="API Key",
+                                type="password"
+                            )
+                            anthropic_model = gr.Dropdown(
+                                choices=["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+                                label="Model",
+                                value="claude-3-opus-20240229"
+                            )
+                            anthropic_save = gr.Button("Save Configuration", variant="primary")
+                        
+                        with gr.Tab("Local LLM"):
+                            gr.Markdown("### Local LLM Configuration")
+                            local_base_url = gr.Textbox(
+                                label="Base URL",
+                                placeholder="http://localhost:8000/v1"
+                            )
+                            local_model = gr.Textbox(
+                                label="Model Name",
+                                placeholder="local-llm"
+                            )
+                            local_save = gr.Button("Save Configuration", variant="primary")
+        
+        # Event Handlers
+        def handle_login(provider: str):
+            """Handle login - in demo mode, just authenticate."""
+            # Update user display based on provider
+            user_display_text = f"Demo User ({provider.capitalize()})"
+            return (
+                gr.update(visible=False),  # Hide login page
+                gr.update(visible=True),   # Show main app
+                {"authenticated": True, "user_id": "demo_user", "token": "demo_token", "provider": provider},
+                "chat",  # Navigate to chat page
+                user_display_text  # Update user display
             )
         
-        submit_btn = gr.Button("Ask", variant="primary")
-        answer_output = gr.Markdown(label="Answer")
+        def navigate_to_chat(user_state):
+            """Navigate to chat page and update status."""
+            status_update = "Ask questions about your documents • 0 document(s) loaded • Using default model"
+            if user_state and user_state.get("authenticated"):
+                user_id = user_state.get("user_id")
+                if user_id and user_id != "demo_user":
+                    try:
+                        db = next(get_db())
+                        try:
+                            status_update = update_status_text(user_state, db)
+                        finally:
+                            db.close()
+                    except:
+                        pass
+            return (
+                gr.update(visible=True),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                "chat",
+                status_update
+            )
         
-        # Event handlers
-        def google_login():
-            return "Please visit: /auth/login/google (or click the button to open in new tab)"
+        def navigate_to_documents():
+            return (
+                gr.update(visible=False),
+                gr.update(visible=True),
+                gr.update(visible=False),
+                "documents"
+            )
         
-        def microsoft_login():
-            return "Please visit: /auth/login/microsoft (or click the button to open in new tab)"
+        def navigate_to_settings():
+            return (
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(visible=True),
+                "settings"
+            )
         
-        def ingest_files_handler(files, token):
-            if not token:
-                return "Please login first"
+        def handle_logout():
+            return (
+                gr.update(visible=True),   # Show login page
+                gr.update(visible=False),  # Hide main app
+                {"authenticated": False, "user_id": None, "token": None},
+                "login"
+            )
+        
+        def send_message(message, history, user_state):
+            """Handle sending a chat message."""
+            if not message.strip():
+                return history, "", gr.update(visible=True), gr.update(visible=False)
+            
+            # Add user message
+            if history is None:
+                history = []
+            history.append([message, None])
+            
+            # Get response from backend
+            response = "This is a demo response. Please configure your LLM settings and upload documents to enable RAG-based queries."
+            
+            if user_state and user_state.get("authenticated"):
+                user_id = user_state.get("user_id")
+                if user_id and user_id != "demo_user":
+                    try:
+                        db = next(get_db())
+                        try:
+                            result = ask_question(
+                                query=message,
+                                user_id=user_id,
+                                db=db,
+                                use_rag=True
+                            )
+                            response = result.get("answer", "No answer generated")
+                            sources = result.get("sources", [])
+                            if sources:
+                                response += "\n\n**Sources:**\n"
+                                for i, source in enumerate(sources, 1):
+                                    response += f"{i}. {source.get('metadata', {}).get('file_name', 'Unknown')}\n"
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        response = f"Error: {str(e)}"
+            
+            history[-1][1] = response
+            
+            # Hide empty state, show chat
+            return history, "", gr.update(visible=False), gr.update(visible=True)
+        
+        def upload_files_handler(files, user_state):
+            """Handle file upload."""
             if not files:
-                return "Please select files to upload"
+                return "Please select files to upload", gr.update(visible=False), "Ask questions about your documents • 0 document(s) loaded • Using default model"
+            
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first", gr.update(visible=False), "Ask questions about your documents • 0 document(s) loaded • Using default model"
+            
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return f"Demo mode: Would upload {len(files)} file(s)!", gr.update(visible=True), "Ask questions about your documents • 0 document(s) loaded • Using default model"
             
             try:
-                from auth_service import verify_token
-                payload = verify_token(token)
-                user_id = payload.get("sub")
-                
-                # Create database session for Gradio
                 db = next(get_db())
                 try:
                     file_paths = [f.name for f in files if f]
@@ -768,38 +1077,233 @@ def create_gradio_interface():
                         user_id=user_id,
                         db=db
                     )
-                    return "Files ingested successfully!" if success else "Ingestion failed"
+                    if success:
+                        status_update = update_status_text(user_state, db)
+                        return f"Successfully uploaded {len(files)} file(s)!", gr.update(visible=True), status_update
+                    else:
+                        return "Upload failed. Please try again.", gr.update(visible=True), "Ask questions about your documents • 0 document(s) loaded • Using default model"
+                finally:
+                    db.close()
+            except Exception as e:
+                return f"Error: {str(e)}", gr.update(visible=True), "Ask questions about your documents • 0 document(s) loaded • Using default model"
+        
+        # Bind events
+        google_btn.click(
+            fn=lambda: handle_login("google"),
+            outputs=[login_page, main_app, user_state, current_page, user_display]
+        )
+        
+        microsoft_btn.click(
+            fn=lambda: handle_login("microsoft"),
+            outputs=[login_page, main_app, user_state, current_page, user_display]
+        )
+        
+        chat_btn.click(
+            fn=navigate_to_chat,
+            inputs=[user_state],
+            outputs=[chat_page, documents_page, settings_page, current_page, status_text]
+        )
+        
+        documents_btn.click(
+            fn=navigate_to_documents,
+            outputs=[chat_page, documents_page, settings_page, current_page]
+        )
+        
+        settings_btn.click(
+            fn=navigate_to_settings,
+            outputs=[chat_page, documents_page, settings_page, current_page]
+        )
+        
+        logout_btn.click(
+            fn=handle_logout,
+            outputs=[login_page, main_app, user_state, current_page]
+        )
+        
+        send_btn.click(
+            fn=send_message,
+            inputs=[query_input, chat_history, user_state],
+            outputs=[chat_history, query_input, empty_state, chat_history]
+        )
+        
+        query_input.submit(
+            fn=send_message,
+            inputs=[query_input, chat_history, user_state],
+            outputs=[chat_history, query_input, empty_state, chat_history]
+        )
+        
+        file_upload.change(
+            fn=upload_files_handler,
+            inputs=[file_upload, user_state],
+            outputs=[upload_status, upload_status, status_text]
+        )
+        
+        def connect_google_drive(folder_id, user_state):
+            """Handle Google Drive connection."""
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: Google Drive connection (not persisted)"
+            try:
+                db = next(get_db())
+                try:
+                    success, kb_id = ingest_google_drive(
+                        folder_id=folder_id if folder_id else None,
+                        user_id=user_id,
+                        db=db
+                    )
+                    if success:
+                        return f"Google Drive connected successfully! Knowledge base ID: {kb_id}"
+                    else:
+                        return "Failed to connect Google Drive. Please check your credentials."
                 finally:
                     db.close()
             except Exception as e:
                 return f"Error: {str(e)}"
         
-        google_login_btn.click(
-            fn=lambda: gr.update(value="Please visit: /auth/login/google"),
-            outputs=answer_output
+        def connect_onedrive(folder_path, user_state):
+            """Handle OneDrive connection."""
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: OneDrive connection (not persisted)"
+            return "OneDrive integration requires credential storage implementation"
+        
+        connect_drive_btn.click(
+            fn=connect_google_drive,
+            inputs=[drive_folder_input, user_state],
+            outputs=[upload_status]
         )
         
-        microsoft_login_btn.click(
-            fn=lambda: gr.update(value="Please visit: /auth/login/microsoft"),
-            outputs=answer_output
+        connect_onedrive_btn.click(
+            fn=connect_onedrive,
+            inputs=[onedrive_path_input, user_state],
+            outputs=[upload_status]
         )
         
-        ingest_files_btn.click(
-            fn=lambda files, token: ingest_files_handler(files, token),
-            inputs=[file_upload, token_input],
-            outputs=answer_output
+        # LLM Configuration save handlers
+        def save_openai_config(api_key, model, temp, user_state):
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: Configuration saved (not persisted)"
+            
+            try:
+                db = next(get_db())
+                try:
+                    from app.services.llm_service import create_llm_config
+                    config = create_llm_config(
+                        db=db,
+                        user_id=user_id,
+                        provider="openai",
+                        api_key=api_key,
+                        model_name=model,
+                        temperature=temp,
+                        is_default=True
+                    )
+                    return "OpenAI configuration saved successfully!"
+                finally:
+                    db.close()
+            except Exception as e:
+                return f"Error: {str(e)}"
+        
+        openai_save.click(
+            fn=save_openai_config,
+            inputs=[openai_api_key, openai_model, openai_temp, user_state],
+            outputs=[save_status]
         )
         
-        submit_btn.click(
-            fn=lambda q, t: gradio_query(q, t),
-            inputs=[query_input, token_input],
-            outputs=answer_output
+        # Similar handlers for other LLM providers
+        def save_gemini_config(api_key, model, user_state):
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: Configuration saved (not persisted)"
+            try:
+                db = next(get_db())
+                try:
+                    from app.services.llm_service import create_llm_config
+                    create_llm_config(
+                        db=db,
+                        user_id=user_id,
+                        provider="gemini",
+                        api_key=api_key,
+                        model_name=model,
+                        is_default=True
+                    )
+                    return "Gemini configuration saved successfully!"
+                finally:
+                    db.close()
+            except Exception as e:
+                return f"Error: {str(e)}"
+        
+        def save_anthropic_config(api_key, model, user_state):
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: Configuration saved (not persisted)"
+            try:
+                db = next(get_db())
+                try:
+                    from app.services.llm_service import create_llm_config
+                    create_llm_config(
+                        db=db,
+                        user_id=user_id,
+                        provider="anthropic",
+                        api_key=api_key,
+                        model_name=model,
+                        is_default=True
+                    )
+                    return "Anthropic configuration saved successfully!"
+                finally:
+                    db.close()
+            except Exception as e:
+                return f"Error: {str(e)}"
+        
+        def save_local_config(base_url, model, user_state):
+            if not user_state or not user_state.get("authenticated"):
+                return "Please login first"
+            user_id = user_state.get("user_id")
+            if not user_id or user_id == "demo_user":
+                return "Demo mode: Configuration saved (not persisted)"
+            try:
+                db = next(get_db())
+                try:
+                    from app.services.llm_service import create_llm_config
+                    create_llm_config(
+                        db=db,
+                        user_id=user_id,
+                        provider="local",
+                        base_url=base_url,
+                        model_name=model,
+                        is_default=True
+                    )
+                    return "Local LLM configuration saved successfully!"
+                finally:
+                    db.close()
+            except Exception as e:
+                return f"Error: {str(e)}"
+        
+        gemini_save.click(
+            fn=save_gemini_config,
+            inputs=[gemini_api_key, gemini_model, user_state],
+            outputs=[save_status]
         )
         
-        query_input.submit(
-            fn=lambda q, t: gradio_query(q, t),
-            inputs=[query_input, token_input],
-            outputs=answer_output
+        anthropic_save.click(
+            fn=save_anthropic_config,
+            inputs=[anthropic_api_key, anthropic_model, user_state],
+            outputs=[save_status]
+        )
+        
+        local_save.click(
+            fn=save_local_config,
+            inputs=[local_base_url, local_model, user_state],
+            outputs=[save_status]
         )
     
     return demo

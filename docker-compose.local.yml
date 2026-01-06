@@ -5,6 +5,13 @@ version: '3.8'
 
 services:
   app:
+    # Run the existing application entrypoint
+    # (FastAPI + Gradio started from app.py)
+    command: python app.py
+    # Mount source code for live reload
+    volumes:
+      - .:/app
+      - ./data:/app/data:ro
     environment:
       # Override to use local databases via host.docker.internal
       # On Linux, you may need to use network_mode: host instead
