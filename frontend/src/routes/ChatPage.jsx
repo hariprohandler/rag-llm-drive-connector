@@ -1,7 +1,11 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useContext } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api.js";
+import { UserContext } from "../App.jsx";
 
 const ChatPage = () => {
+  const { setUser } = useContext(UserContext);
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,20 +56,39 @@ const ChatPage = () => {
       console.error("Chat error:", e);
       let errorMessage = "An error occurred";
       
+      // Check for authentication errors
+      let isAuthError = false;
       if (e.message) {
         try {
           const errorData = JSON.parse(e.message);
-          if (errorData.detail === "Not authenticated") {
+          if (errorData.detail === "Not authenticated" || 
+              errorData.detail?.includes("authenticated") ||
+              errorData.detail === "Could not validate credentials") {
+            isAuthError = true;
             errorMessage = "Authentication failed. Please log in again.";
-            setTimeout(() => {
-              window.location.href = "/login";
-            }, 2000);
           } else {
             errorMessage = errorData.detail || errorMessage;
           }
         } catch {
-          errorMessage = e.message;
+          // Check if error message contains authentication-related text
+          if (e.message.includes("authenticated") || 
+              e.message.includes("401") ||
+              e.message.includes("Unauthorized")) {
+            isAuthError = true;
+            errorMessage = "Authentication failed. Please log in again.";
+          } else {
+            errorMessage = e.message;
+          }
         }
+      }
+      
+      // Handle authentication error - clear user and redirect immediately
+      if (isAuthError) {
+        setUser(null);
+        // Use a small delay to show the error message, then redirect
+        setTimeout(() => {
+          navigate("/login", { replace: true });
+        }, 1000);
       }
 
       setError(errorMessage);

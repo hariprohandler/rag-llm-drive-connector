@@ -12,8 +12,20 @@ async function request(path, options = {}) {
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || res.statusText);
+    let errorMessage = res.statusText;
+    try {
+      const errorData = await res.json();
+      errorMessage = JSON.stringify(errorData);
+    } catch {
+      // If response is not JSON, try to get text
+      try {
+        const text = await res.text();
+        errorMessage = text || res.statusText;
+      } catch {
+        errorMessage = res.statusText;
+      }
+    }
+    throw new Error(errorMessage);
   }
   return res.json();
 }

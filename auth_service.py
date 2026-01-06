@@ -5,7 +5,8 @@ from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 from typing import Optional
-import models
+from app.models import User
+from app.models.base import get_db
 import config
 from activity_logger import get_logger, get_client_ip, get_user_agent
 
@@ -14,7 +15,8 @@ SECRET_KEY = config.settings.jwt_secret_key or config.settings.openai_api_key  #
 ALGORITHM = config.settings.jwt_algorithm
 ACCESS_TOKEN_EXPIRE_MINUTES = config.settings.jwt_expire_minutes
 
-security = HTTPBearer()
+# Make security optional to support cookie-based auth
+security = HTTPBearer(auto_error=False)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None, request: Optional[Request] = None):
@@ -77,12 +79,36 @@ def verify_token(token: str, request: Optional[Request] = None) -> dict:
 
 def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(models.get_db)
-) -> models.User:
-    """Get current authenticated user from JWT token."""
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+) -> User:
+    """
+    Get current authenticated user from JWT token.
+    Supports both cookie-based (for React frontend) and Bearer token (for API clients) authentication.
+    """
     logger = get_logger()
-    token = credentials.credentials
+    
+    # Try to get token from cookie first (for React frontend)
+    token = request.cookies.get("access_token")
+    
+    # Fallback to Authorization header (for API clients)
+    if not token and credentials:
+        token = credentials.credentials
+    
+    if not token:
+        logger.log_auth_activity(
+            auth_action="user_retrieval",
+            status="failure",
+            error="No token provided (neither cookie nor Authorization header)",
+            ip_address=get_client_ip(request),
+            user_agent=get_user_agent(request)
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
     payload = verify_token(token, request=request)
     user_id: str = payload.get("sub")
     
@@ -99,7 +125,7 @@ def get_current_user(
             detail="Could not validate credentials",
         )
     
-    user = db.query(models.User).filter(models.User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None or not user.is_active:
         logger.log_auth_activity(
             auth_action="user_retrieval",
@@ -136,10 +162,10 @@ def get_or_create_user(
     provider_id: str,
     picture: Optional[str] = None,
     request: Optional[Request] = None
-) -> models.User:
+) -> User:
     """Get existing user or create new user."""
     logger = get_logger()
-    user = db.query(models.User).filter(models.User.email == email).first()
+    user = db.query(User).filter(User.email == email).first()
     
     if user:
         # Update user info
@@ -166,7 +192,7 @@ def get_or_create_user(
     
     # Create new user
     user_id = f"{provider}_{provider_id}"
-    user = models.User(
+    user = User(
         id=user_id,
         email=email,
         name=name,
@@ -193,6 +219,6 @@ def get_or_create_user(
     return user
 
 
-def get_user_by_email(db: Session, email: str) -> Optional[models.User]:
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """Get user by email."""
-    return db.query(models.User).filter(models.User.email == email).first()
+    return db.query(User).filter(User.email == email).first()

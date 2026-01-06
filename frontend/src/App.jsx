@@ -15,11 +15,19 @@ const App = () => {
 
   useEffect(() => {
     // Check authentication status
-    api
-      .me()
-      .then((u) => setUser(u))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+    const checkAuth = async () => {
+      try {
+        const u = await api.me();
+        setUser(u);
+      } catch (error) {
+        // If authentication fails, clear user state
+        setUser(null);
+        // If we're on a protected route, redirect will happen via the check below
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAuth();
   }, []);
 
   if (loading) {
