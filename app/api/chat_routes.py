@@ -17,6 +17,7 @@ from app.services.chat_service import (
 )
 from app.services.rag import ask_question
 from app.services.auth_service import get_current_user
+from app.helpers.logging_helper import ActivityLogger
 
 
 class ChatMessageRequest(BaseModel):
@@ -45,20 +46,34 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 @router.post("/conversations")
 async def create_chat_conversation(
+    fastapi_request: Request,
     request: ConversationRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Create a new chat conversation."""
-    conversation = create_conversation(
-        db=db,
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="conversation_create",
+        endpoint="/api/chat/conversations",
+        method="POST",
         user_id=current_user.id,
-        title=request.title,
-        is_private=request.is_private,
-        llm_config_id=request.llm_config_id,
-        use_rag=request.use_rag,
+        metadata={"title": request.title, "is_private": request.is_private}
     )
-    return conversation.to_dict()
+    try:
+        conversation = create_conversation(
+            db=db,
+            user_id=current_user.id,
+            title=request.title,
+            is_private=request.is_private,
+            llm_config_id=request.llm_config_id,
+            use_rag=request.use_rag,
+        )
+        activity_logger.log_success({"conversation_id": conversation.id})
+        return conversation.to_dict()
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/conversations")
@@ -132,6 +147,14 @@ async def send_chat_message(
     db: Session = Depends(get_db),
 ):
     """Send a message in a chat conversation."""
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="chat_message",
+        endpoint="/api/chat/messages",
+        method="POST",
+        user_id=current_user.id,
+        metadata={"conversation_id": request.conversation_id, "use_rag": request.use_rag, "content_length": len(request.content)}
+    )
     try:
         # Get or create conversation
         if request.conversation_id:
@@ -178,6 +201,11 @@ async def send_chat_message(
             },
         )
 
+        activity_logger.log_success({
+            "conversation_id": conversation.id,
+            "answer_length": len(result.get("answer", "")),
+            "sources_count": len(result.get("sources", []))
+        })
         return {
             "conversation_id": conversation.id,
             "user_message": user_message.to_dict(),
@@ -185,6 +213,7 @@ async def send_chat_message(
             "sources": result.get("sources", []),
         }
     except Exception as e:
+        activity_logger.log_error(str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 

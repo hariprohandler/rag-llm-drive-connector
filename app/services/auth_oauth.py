@@ -10,6 +10,7 @@ import config
 from app.models import User
 from app.services.auth_service import get_or_create_user, create_access_token
 from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
+from app.middleware.tracing import get_tracing_id
 import secrets
 
 # In-memory storage for OAuth state (use Redis in production)
@@ -79,7 +80,8 @@ def get_google_auth_url(redirect_uri: str, request: Optional[Request] = None, us
         status="success",
         metadata={"redirect_uri": redirect_uri},
         ip_address=get_client_ip(request) if request else None,
-        user_agent=get_user_agent(request) if request else None
+        user_agent=get_user_agent(request) if request else None,
+        tracing_id=get_tracing_id(request) if request else None
     )
     
     return auth_url, state
@@ -96,7 +98,8 @@ def handle_google_callback(code: str, state: str, db: Session, request: Optional
             status="failure",
             error="Invalid state parameter",
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         raise HTTPException(status_code=400, detail="Invalid state parameter")
     
@@ -152,7 +155,8 @@ def handle_google_callback(code: str, state: str, db: Session, request: Optional
             provider="google",
             status="success",
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         
         return user, access_token
@@ -163,7 +167,8 @@ def handle_google_callback(code: str, state: str, db: Session, request: Optional
             status="failure",
             error=str(e),
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         raise
 
@@ -227,7 +232,8 @@ def handle_microsoft_callback(code: str, state: str, db: Session, request: Optio
             status="failure",
             error="Invalid state parameter",
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         raise HTTPException(status_code=400, detail="Invalid state parameter")
     
@@ -327,7 +333,8 @@ def handle_microsoft_callback(code: str, state: str, db: Session, request: Optio
             provider="microsoft",
             status="success",
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         
         return user, jwt_token
@@ -338,7 +345,8 @@ def handle_microsoft_callback(code: str, state: str, db: Session, request: Optio
             status="failure",
             error=str(e),
             ip_address=get_client_ip(request) if request else None,
-            user_agent=get_user_agent(request) if request else None
+            user_agent=get_user_agent(request) if request else None,
+            tracing_id=get_tracing_id(request) if request else None
         )
         raise
 
