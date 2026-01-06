@@ -7,6 +7,7 @@ from app.models.chat import ChatConversation, ChatMessage
 from app.models.user_settings import UserSettings
 from app.models.oauth_credentials import OAuthCredentials
 from app.models.tool_config import ToolConfig
+from app.models.database_connection import DatabaseConnection
 
 __all__ = [
     "Base",
@@ -18,5 +19,6 @@ __all__ = [
     "UserSettings",
     "OAuthCredentials",
     "ToolConfig",
+    "DatabaseConnection",
 ]
 

@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from app.core.config import settings
-from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes, drive_routes, tools_routes
+from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes, drive_routes, tools_routes, database_routes
 from app.middleware.tracing import TracingMiddleware
 
 # Initialize database
@@ -43,6 +43,7 @@ app.include_router(chat_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(drive_routes.router)
 app.include_router(tools_routes.router)
+app.include_router(database_routes.router)
 
 
 @app.get("/")

@@ -33,16 +33,27 @@ class SyncRequest(BaseModel):
 
 @router.get("")
 async def list_tools(
+    fastapi_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List all available tools and their configurations for the current user."""
-    tools = db.query(ToolConfig).filter(
-        ToolConfig.user_id == current_user.id
-    ).all()
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="tool_list",
+        endpoint="/api/tools",
+        method="GET",
+        user_id=current_user.id,
+        metadata={}
+    )
     
-    # Available tools (others disabled for now)
-    available_tools = {
+    try:
+        tools = db.query(ToolConfig).filter(
+            ToolConfig.user_id == current_user.id
+        ).all()
+        
+        # Available tools (others disabled for now)
+        available_tools = {
         "zendesk": {
             "name": "Zendesk",
             "description": "Sync support tickets from Zendesk",
@@ -78,40 +89,62 @@ async def list_tools(
             "icon": "📨",
             "enabled": False,
         },
-    }
-    
-    # Map user's tool configs
-    user_configs = {tool.tool_name: tool.to_dict() for tool in tools}
-    
-    # Merge with available tools
-    result = []
-    for tool_key, tool_info in available_tools.items():
-        tool_data = {
-            "tool_name": tool_key,
-            **tool_info,
-            "config": user_configs.get(tool_key)
         }
-        result.append(tool_data)
-    
-    return result
+        
+        # Map user's tool configs
+        user_configs = {tool.tool_name: tool.to_dict() for tool in tools}
+        
+        # Merge with available tools
+        result = []
+        for tool_key, tool_info in available_tools.items():
+            tool_data = {
+                "tool_name": tool_key,
+                **tool_info,
+                "config": user_configs.get(tool_key)
+            }
+            result.append(tool_data)
+        
+        activity_logger.log_success({"tools_count": len(result), "configured_count": len(tools)})
+        return result
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{tool_name}")
 async def get_tool_config(
     tool_name: str,
+    fastapi_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Get configuration for a specific tool."""
-    tool = db.query(ToolConfig).filter(
-        ToolConfig.user_id == current_user.id,
-        ToolConfig.tool_name == tool_name
-    ).first()
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="tool_config_get",
+        endpoint=f"/api/tools/{tool_name}",
+        method="GET",
+        user_id=current_user.id,
+        metadata={"tool_name": tool_name}
+    )
     
-    if not tool:
-        raise HTTPException(status_code=404, detail="Tool configuration not found")
-    
-    return tool.to_dict()
+    try:
+        tool = db.query(ToolConfig).filter(
+            ToolConfig.user_id == current_user.id,
+            ToolConfig.tool_name == tool_name
+        ).first()
+        
+        if not tool:
+            activity_logger.log_error("Tool configuration not found", status_code=404)
+            raise HTTPException(status_code=404, detail="Tool configuration not found")
+        
+        activity_logger.log_success({"tool_config_id": tool.id})
+        return tool.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("")
@@ -363,17 +396,36 @@ async def sync_tool(
 @router.get("/sync/{task_id}")
 async def get_sync_status(
     task_id: str,
+    fastapi_request: Request,
     current_user: User = Depends(get_current_user),
 ):
     """Get the status of a sync task."""
-    task = get_tool_sync_task(task_id)
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="tool_sync_status",
+        endpoint=f"/api/tools/sync/{task_id}",
+        method="GET",
+        user_id=current_user.id,
+        metadata={"task_id": task_id}
+    )
     
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    
-    # Verify task belongs to user
-    if task.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return task.to_dict()
+    try:
+        task = get_tool_sync_task(task_id)
+        
+        if not task:
+            activity_logger.log_error("Task not found", status_code=404)
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        # Verify task belongs to user
+        if task.user_id != current_user.id:
+            activity_logger.log_error("Access denied", status_code=403)
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        activity_logger.log_success({"task_id": task_id, "status": task.status})
+        return task.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 

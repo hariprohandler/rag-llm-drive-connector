@@ -19,6 +19,9 @@ from app.services.chat_service import (
 )
 from app.services.rag import ask_question
 from app.services.auth_service import get_current_user
+from app.services.sql_agent_service import is_sql_query, execute_sql_query, get_best_sql_model
+from app.models import DatabaseConnection, LLMConfig
+from app.services.rag import get_llm_from_config
 from app.helpers.logging_helper import ActivityLogger
 
 
@@ -151,10 +154,107 @@ async def stream_chat_response(
     llm_config_id: Optional[int] = None,
     use_rag: bool = True,
     source_filter: Optional[str] = None,
+    database_connection_id: Optional[int] = None,
 ) -> AsyncGenerator[str, None]:
     """Stream chat response as Server-Sent Events."""
     from app.services.rag_streaming import stream_question
     
+    # Check if this is a SQL query and we have a database connection
+    if database_connection_id and is_sql_query(query):
+        # Handle SQL query with streaming
+        activity_logger = None
+        try:
+            from app.models import DatabaseConnection, LLMConfig
+            from app.services.rag import get_llm_from_config
+            from app.helpers.logging_helper import ActivityLogger
+            
+            # Log SQL query execution
+            activity_logger = ActivityLogger(
+                request=fastapi_request,
+                activity_type="sql_query_chat",
+                endpoint="/api/chat/messages",
+                method="POST",
+                user_id=user_id,
+                metadata={
+                    "conversation_id": conversation_id,
+                    "database_connection_id": database_connection_id,
+                    "query": query
+                }
+            )
+            
+            # Get database connection
+            db_conn = db.query(DatabaseConnection).filter(
+                DatabaseConnection.id == database_connection_id,
+                DatabaseConnection.user_id == user_id
+            ).first()
+            
+            if db_conn:
+                # Get LLM config
+                if llm_config_id:
+                    llm_config = db.query(LLMConfig).filter(
+                        LLMConfig.id == llm_config_id,
+                        LLMConfig.user_id == user_id,
+                        LLMConfig.is_active == True
+                    ).first()
+                else:
+                    llm_config = db.query(LLMConfig).filter(
+                        LLMConfig.user_id == user_id,
+                        LLMConfig.is_default == True,
+                        LLMConfig.is_active == True
+                    ).first()
+                
+                if llm_config:
+                    # Get best SQL model
+                    all_llm_configs = db.query(LLMConfig).filter(
+                        LLMConfig.user_id == user_id,
+                        LLMConfig.is_active == True
+                    ).all()
+                    default_llm = get_llm_from_config(llm_config)
+                    sql_llm = get_best_sql_model(all_llm_configs, default_llm)
+                    
+                    # Execute SQL query (non-streaming for now, but we can stream the result)
+                    result = execute_sql_query(
+                        query=query,
+                        connection_string=db_conn.connection_string,
+                        db_type=db_conn.db_type,
+                        llm=sql_llm,
+                        schema_info=db_conn.schema_info
+                    )
+                    
+                    # Log SQL query result
+                    if activity_logger:
+                        activity_logger.log_success({
+                            "sql_query": result.get("sql_query", ""),
+                            "has_error": "error" in result,
+                            "answer_length": len(result.get("answer", ""))
+                        })
+                    
+                    # Stream the answer token by token (simulate streaming)
+                    answer = result.get("answer", "")
+                    for char in answer:
+                        yield f"data: {json.dumps({'type': 'token', 'content': char})}\n\n"
+                    
+                    # Send sources
+                    sources = result.get("sources", [])
+                    if result.get("sql_query"):
+                        sources.append({
+                            "type": "sql",
+                            "query": result.get("sql_query", ""),
+                            "database": db_conn.name
+                        })
+                    yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+                    
+                    # Send done
+                    yield f"data: {json.dumps({'type': 'done', 'answer': answer, 'sources': sources, 'sql_query': result.get('sql_query', '')})}\n\n"
+                    return
+        except Exception as e:
+            # Log SQL query error if activity_logger was created
+            if activity_logger:
+                activity_logger.log_error(f"SQL query error: {str(e)}")
+            yield f"data: {json.dumps({'type': 'error', 'error': f'SQL query error: {str(e)}'})}\n\n"
+            return
+    
+    # Default to RAG streaming
     try:
         full_answer = ""
         sources = []
@@ -229,8 +329,100 @@ async def send_chat_message(
             content=request.content,
         )
 
+        # Check if query is SQL-related and user has database connections
+        should_use_sql = False
+        database_connection_id = None
+        
+        if is_sql_query(request.content):
+            # Check if user has active database connections
+            db_connections = db.query(DatabaseConnection).filter(
+                DatabaseConnection.user_id == current_user.id,
+                DatabaseConnection.is_active == True
+            ).all()
+            
+            if db_connections:
+                # Use the first active connection (could be enhanced to select based on context)
+                # For now, we'll use the first one or allow user to specify
+                database_connection_id = db_connections[0].id
+                should_use_sql = True
+
         # Check if client wants streaming (via query parameter or header)
         stream = fastapi_request.query_params.get("stream", "true").lower() == "true"
+        
+        # If SQL query and streaming is disabled, execute SQL directly
+        if should_use_sql and not stream:
+            # Get LLM config
+            if conversation.llm_config_id or request.llm_config_id:
+                llm_config_id = conversation.llm_config_id or request.llm_config_id
+                llm_config = db.query(LLMConfig).filter(
+                    LLMConfig.id == llm_config_id,
+                    LLMConfig.user_id == current_user.id,
+                    LLMConfig.is_active == True
+                ).first()
+            else:
+                llm_config = db.query(LLMConfig).filter(
+                    LLMConfig.user_id == current_user.id,
+                    LLMConfig.is_default == True,
+                    LLMConfig.is_active == True
+                ).first()
+            
+            if not llm_config:
+                raise HTTPException(status_code=404, detail="LLM configuration not found")
+            
+            # Get best SQL model
+            all_llm_configs = db.query(LLMConfig).filter(
+                LLMConfig.user_id == current_user.id,
+                LLMConfig.is_active == True
+            ).all()
+            default_llm = get_llm_from_config(llm_config)
+            sql_llm = get_best_sql_model(all_llm_configs, default_llm)
+            
+            # Get database connection
+            db_conn = db.query(DatabaseConnection).filter(
+                DatabaseConnection.id == database_connection_id,
+                DatabaseConnection.user_id == current_user.id
+            ).first()
+            
+            if db_conn:
+                # Execute SQL query
+                result = execute_sql_query(
+                    query=request.content,
+                    connection_string=db_conn.connection_string,
+                    db_type=db_conn.db_type,
+                    llm=sql_llm,
+                    schema_info=db_conn.schema_info
+                )
+                
+                # Add assistant message
+                assistant_message = add_message(
+                    db=db,
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=result.get("answer", ""),
+                    metadata={
+                        "sources": result.get("sources", []),
+                        "sql_query": result.get("sql_query", ""),
+                        "use_sql": True,
+                    },
+                )
+                
+                activity_logger.log_success({
+                    "conversation_id": conversation.id,
+                    "answer_length": len(result.get("answer", "")),
+                    "use_sql": True,
+                    "database_connection_id": database_connection_id,
+                    "sql_query": result.get("sql_query", ""),
+                    "has_error": "error" in result
+                })
+                
+                return {
+                    "conversation_id": conversation.id,
+                    "message_id": assistant_message.id,
+                    "answer": result.get("answer", ""),
+                    "sources": result.get("sources", []),
+                    "sql_query": result.get("sql_query", ""),
+                    "use_sql": True,
+                }
         
         if stream:
             # Return streaming response
@@ -246,6 +438,7 @@ async def send_chat_message(
                     llm_config_id=conversation.llm_config_id or request.llm_config_id,
                     use_rag=request.use_rag if request.use_rag is not None else (conversation.use_rag if request.conversation_id else False),
                     source_filter=request.source_filter,
+                    database_connection_id=database_connection_id if should_use_sql else None,
                 ):
                     # Parse SSE format: "data: {...}\n\n"
                     try:

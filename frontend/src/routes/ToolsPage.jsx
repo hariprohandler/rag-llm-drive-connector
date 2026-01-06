@@ -15,9 +15,14 @@ const ToolsPage = () => {
   const [editingTool, setEditingTool] = useState(null);
   const [syncTasks, setSyncTasks] = useState({}); // task_id -> task data
   const [syncingTools, setSyncingTools] = useState(new Set());
+  const [databaseConnections, setDatabaseConnections] = useState([]);
+  const [loadingDatabases, setLoadingDatabases] = useState(true);
+  const [editingDatabase, setEditingDatabase] = useState(null);
+  const [showDatabaseForm, setShowDatabaseForm] = useState(false);
 
   useEffect(() => {
     loadTools();
+    loadDatabaseConnections();
   }, []);
 
   const loadTools = async () => {
@@ -29,6 +34,18 @@ const ToolsPage = () => {
       console.error("Failed to load tools:", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadDatabaseConnections = async () => {
+    try {
+      setLoadingDatabases(true);
+      const data = await api.listDatabaseConnections();
+      setDatabaseConnections(data || []);
+    } catch (e) {
+      console.error("Failed to load database connections:", e);
+    } finally {
+      setLoadingDatabases(false);
     }
   };
 
@@ -230,6 +247,169 @@ const ToolsPage = () => {
         </div>
       </form>
     );
+  };
+
+  const DatabaseConnectionForm = ({ connection = null }) => {
+    const [name, setName] = useState(connection?.name || "");
+    const [dbType, setDbType] = useState(connection?.db_type || "postgresql");
+    const [connectionString, setConnectionString] = useState("");
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      if (!name || (!connectionString && !connection)) {
+        alert("Please fill in all required fields");
+        return;
+      }
+
+      try {
+        if (connection) {
+          await api.updateDatabaseConnection(connection.id, {
+            name: name.trim(),
+            connection_string: connectionString.trim() || undefined,
+          });
+        } else {
+          await api.createDatabaseConnection({
+            name: name.trim(),
+            db_type: dbType,
+            connection_string: connectionString.trim(),
+          });
+        }
+        await loadDatabaseConnections();
+        setShowDatabaseForm(false);
+        setEditingDatabase(null);
+      } catch (e) {
+        alert(`Error: ${e.message}`);
+      }
+    };
+
+    const getConnectionStringPlaceholder = () => {
+      switch (dbType) {
+        case "postgresql":
+          return "postgresql://username:password@host:port/database";
+        case "mysql":
+          return "mysql://username:password@host:port/database";
+        case "sqlite":
+          return "/path/to/database.db";
+        default:
+          return "Connection string";
+      }
+    };
+
+    const getConnectionStringHelp = () => {
+      switch (dbType) {
+        case "postgresql":
+          return "Format: postgresql://username:password@host:port/database";
+        case "mysql":
+          return "Format: mysql://username:password@host:port/database";
+        case "sqlite":
+          return "Path to SQLite database file (e.g., /path/to/database.db)";
+        default:
+          return "";
+      }
+    };
+
+    return (
+      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)" }}>
+        <div>
+          <label style={{ display: "block", marginBottom: "var(--spacing-xs)", fontSize: "0.875rem", fontWeight: 500, color: "var(--text-primary)" }}>
+            Connection Name <span style={{ color: "var(--error)" }}>*</span>
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="input"
+            placeholder="My Database Connection"
+            required
+          />
+        </div>
+
+        <div>
+          <label style={{ display: "block", marginBottom: "var(--spacing-xs)", fontSize: "0.875rem", fontWeight: 500, color: "var(--text-primary)" }}>
+            Database Type <span style={{ color: "var(--error)" }}>*</span>
+          </label>
+          <select
+            value={dbType}
+            onChange={(e) => setDbType(e.target.value)}
+            className="input"
+            disabled={!!connection}
+            required
+          >
+            <option value="postgresql">PostgreSQL</option>
+            <option value="mysql">MySQL</option>
+            <option value="sqlite">SQLite</option>
+          </select>
+          {connection && (
+            <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "var(--spacing-xs)" }}>
+              Database type cannot be changed after creation
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label style={{ display: "block", marginBottom: "var(--spacing-xs)", fontSize: "0.875rem", fontWeight: 500, color: "var(--text-primary)" }}>
+            Connection String <span style={{ color: "var(--error)" }}>*</span>
+          </label>
+          <input
+            type="password"
+            value={connectionString}
+            onChange={(e) => setConnectionString(e.target.value)}
+            className="input"
+            placeholder={getConnectionStringPlaceholder()}
+            required={!connection}
+          />
+          <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "var(--spacing-xs)" }}>
+            {getConnectionStringHelp()}
+          </p>
+          {connection && (
+            <p style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: "var(--spacing-xs)", fontStyle: "italic" }}>
+              Leave blank to keep existing connection string, or enter a new one to update.
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: "var(--spacing-md)" }}>
+          <button type="submit" className="btn btn-primary" style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}>
+            <span>💾</span>
+            <span>{connection ? "Update Connection" : "Create Connection"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowDatabaseForm(false);
+              setEditingDatabase(null);
+            }}
+            className="btn btn-secondary"
+            style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}
+          >
+            <span>❌</span>
+            <span>Cancel</span>
+          </button>
+        </div>
+      </form>
+    );
+  };
+
+  const handleDeleteDatabase = async (connectionId) => {
+    if (!confirm("Are you sure you want to delete this database connection?")) {
+      return;
+    }
+    try {
+      await api.deleteDatabaseConnection(connectionId);
+      await loadDatabaseConnections();
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  };
+
+  const handleRefreshSchema = async (connectionId) => {
+    try {
+      await api.refreshDatabaseSchema(connectionId);
+      await loadDatabaseConnections();
+      alert("Schema refreshed successfully!");
+    } catch (e) {
+      alert(`Error refreshing schema: ${e.message}`);
+    }
   };
 
   return (
@@ -462,6 +642,170 @@ const ToolsPage = () => {
           })}
         </div>
       )}
+
+      {/* Database Connections Section */}
+      <div style={{ marginTop: "var(--spacing-xl)", paddingTop: "var(--spacing-xl)", borderTop: "2px solid var(--gray-200)" }}>
+        <div className="fade-in-down" style={{ marginBottom: "var(--spacing-xl)" }}>
+          <h1
+            style={{
+              fontSize: "2rem",
+              fontWeight: 700,
+              marginBottom: "var(--spacing-sm)",
+              color: "var(--text-primary)",
+            }}
+          >
+            Database Connections
+          </h1>
+          <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+            Connect external databases to enable SQL queries and data analysis through natural language.
+          </p>
+        </div>
+
+        {loadingDatabases ? (
+          <SkeletonLoader />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-lg)" }}>
+            {showDatabaseForm && (
+              <div className="card fade-in-up">
+                <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "var(--spacing-md)", color: "var(--text-primary)" }}>
+                  {editingDatabase ? "Edit Database Connection" : "Add New Database Connection"}
+                </h2>
+                <DatabaseConnectionForm connection={editingDatabase} />
+              </div>
+            )}
+
+            {databaseConnections.map((conn) => (
+              <div key={conn.id} className="card fade-in-up">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--spacing-lg)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-md)" }}>
+                    <span style={{ fontSize: "2rem" }}>
+                      {conn.db_type === "postgresql" ? "🐘" : conn.db_type === "mysql" ? "🐬" : "💾"}
+                    </span>
+                    <div>
+                      <h2
+                        style={{
+                          fontSize: "1.25rem",
+                          fontWeight: 600,
+                          marginBottom: "var(--spacing-xs)",
+                          color: "var(--text-primary)",
+                        }}
+                      >
+                        {conn.name}
+                      </h2>
+                      <p style={{ color: "var(--text-secondary)", fontSize: "0.875rem" }}>
+                        {conn.db_type.toUpperCase()} Database
+                        {conn.schema_updated_at && (
+                          <span style={{ marginLeft: "var(--spacing-sm)" }}>
+                            • Schema updated: {new Date(conn.schema_updated_at).toLocaleString()}
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      padding: "var(--spacing-xs) var(--spacing-md)",
+                      background: conn.is_active ? "var(--success)" : "var(--gray-200)",
+                      color: conn.is_active ? "var(--text-inverse)" : "var(--text-secondary)",
+                      borderRadius: "var(--radius-full)",
+                      fontSize: "0.75rem",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {conn.is_active ? "✓ Active" : "Inactive"}
+                  </span>
+                </div>
+
+                {conn.schema_info && conn.schema_info.tables && (
+                  <div style={{ marginBottom: "var(--spacing-md)", padding: "var(--spacing-sm)", background: "var(--gray-50)", borderRadius: "var(--radius-md)" }}>
+                    <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", marginBottom: "var(--spacing-xs)" }}>
+                      <strong>Schema:</strong> {conn.schema_info.tables.length} table(s) discovered
+                    </p>
+                    {conn.schema_info.tables.slice(0, 5).map((table) => (
+                      <span
+                        key={table.name}
+                        style={{
+                          display: "inline-block",
+                          margin: "var(--spacing-xs) var(--spacing-xs) var(--spacing-xs) 0",
+                          padding: "var(--spacing-xs) var(--spacing-sm)",
+                          background: "var(--gray-200)",
+                          borderRadius: "var(--radius-sm)",
+                          fontSize: "0.75rem",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {table.name} ({table.columns.length} cols)
+                      </span>
+                    ))}
+                    {conn.schema_info.tables.length > 5 && (
+                      <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginLeft: "var(--spacing-xs)" }}>
+                        +{conn.schema_info.tables.length - 5} more
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", gap: "var(--spacing-md)", flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => handleRefreshSchema(conn.id)}
+                    className="btn btn-secondary"
+                    style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}
+                  >
+                    <span>🔄</span>
+                    <span>Refresh Schema</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setEditingDatabase(conn);
+                      setShowDatabaseForm(true);
+                    }}
+                    className="btn btn-secondary"
+                    style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}
+                  >
+                    <span>✏️</span>
+                    <span>Edit</span>
+                  </button>
+                  <button
+                    onClick={() => handleDeleteDatabase(conn.id)}
+                    className="btn btn-danger"
+                    style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}
+                  >
+                    <span>🗑️</span>
+                    <span>Delete</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {!showDatabaseForm && databaseConnections.length === 0 && (
+              <div className="card fade-in-up">
+                <p style={{ color: "var(--text-secondary)", marginBottom: "var(--spacing-md)" }}>
+                  No database connections configured. Add one to start querying your databases with natural language.
+                </p>
+                <button
+                  onClick={() => setShowDatabaseForm(true)}
+                  className="btn btn-primary"
+                  style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}
+                >
+                  <span>➕</span>
+                  <span>Add Database Connection</span>
+                </button>
+              </div>
+            )}
+
+            {!showDatabaseForm && databaseConnections.length > 0 && (
+              <button
+                onClick={() => setShowDatabaseForm(true)}
+                className="btn btn-primary"
+                style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", alignSelf: "flex-start" }}
+              >
+                <span>➕</span>
+                <span>Add Another Database Connection</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

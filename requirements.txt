@@ -16,10 +16,15 @@ langchain-anthropic>=0.1.0
 langchain-core>=0.1.12
 langchain-text-splitters>=0.0.1
 langchain-postgres>=0.0.1
+langchain-experimental>=0.0.50  # For SQL agent
 
 # Vector database
 pgvector>=0.2.3
 psycopg2-binary>=2.9.9
+
+# Database connectors for external databases
+pymysql>=1.1.0  # For MySQL support
+pyodbc>=5.0.0  # For MSSQL support (optional, requires system ODBC drivers)
 
 # OAuth and Drive connectors
 google-auth>=2.23.4

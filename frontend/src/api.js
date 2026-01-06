@@ -168,6 +168,14 @@ export const api = {
   deleteToolConfig: (toolName) => request(`/api/tools/${toolName}`, { method: "DELETE" }),
   syncTool: (body) => request("/api/tools/sync", { method: "POST", body: JSON.stringify(body) }),
   getSyncStatus: (taskId) => request(`/api/tools/sync/${taskId}`),
+  // Database connections
+  listDatabaseConnections: () => request("/api/databases/connections"),
+  getDatabaseConnection: (connectionId) => request(`/api/databases/connections/${connectionId}`),
+  createDatabaseConnection: (body) => request("/api/databases/connections", { method: "POST", body: JSON.stringify(body) }),
+  updateDatabaseConnection: (connectionId, body) => request(`/api/databases/connections/${connectionId}`, { method: "PUT", body: JSON.stringify(body) }),
+  deleteDatabaseConnection: (connectionId) => request(`/api/databases/connections/${connectionId}`, { method: "DELETE" }),
+  refreshDatabaseSchema: (connectionId) => request(`/api/databases/connections/${connectionId}/refresh-schema`, { method: "POST" }),
+  executeSQLQuery: (body) => request("/api/databases/query", { method: "POST", body: JSON.stringify(body) }),
 };
 
 
