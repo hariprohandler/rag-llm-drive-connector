@@ -2,10 +2,11 @@
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 import config
-import models
+import subprocess
+import sys
 
 def setup_database():
-    """Create the pgvector extension and user tables."""
+    """Create the pgvector extension and run database migrations."""
     try:
         # Parse database URL from config
         db_url = config.settings.database_url
@@ -33,10 +34,19 @@ def setup_database():
         cursor.close()
         conn.close()
         
-        # Create user tables
-        print("\nCreating user tables...")
-        models.init_db()
-        print("✓ User tables created successfully!")
+        # Run database migrations
+        print("\nRunning database migrations...")
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            print("✓ Database migrations applied successfully!")
+        else:
+            print(f"⚠ Migration output: {result.stdout}")
+            print(f"⚠ Migration errors: {result.stderr}")
+            raise Exception(f"Migration failed with return code {result.returncode}")
         
         print("\n✅ Database setup complete!")
         

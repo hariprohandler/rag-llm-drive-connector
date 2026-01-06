@@ -3,8 +3,10 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores.pgvector import PGVector
 from langchain_core.documents import Document
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
+from sqlalchemy.orm import Session
 import config
+import models
 import os
 
 
@@ -62,11 +64,22 @@ def ingest_documents(
     return True
 
 
-def ingest_local_files(file_paths: List[str], user_id: str) -> bool:
-    """Ingest local files (PDFs, text files, etc.)."""
+def ingest_local_files(
+    file_paths: List[str],
+    user_id: str,
+    db: Optional[Session] = None,
+    knowledge_base_name: Optional[str] = None
+) -> Tuple[bool, Optional[int]]:
+    """
+    Ingest local files (PDFs, text files, etc.).
+    
+    Returns:
+        Tuple of (success, knowledge_base_id)
+    """
     from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
     
     all_documents = []
+    file_metadata = []
     
     for file_path in file_paths:
         if not os.path.exists(file_path):
@@ -85,6 +98,14 @@ def ingest_local_files(file_paths: List[str], user_id: str) -> bool:
                 continue
                 
             docs = loader.load()
+            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            file_metadata.append({
+                "file_name": os.path.basename(file_path),
+                "file_path": file_path,
+                "file_size": file_size,
+                "file_type": file_ext
+            })
+            
             # Add file metadata
             for doc in docs:
                 doc.metadata.update({
@@ -99,19 +120,46 @@ def ingest_local_files(file_paths: List[str], user_id: str) -> bool:
             continue
     
     if not all_documents:
-        return False
+        return False, None
     
     collection_name = get_user_collection_name(user_id)
     metadata = {"source": "local", "user_id": user_id}
-    return ingest_documents(all_documents, collection_name, metadata)
+    success = ingest_documents(all_documents, collection_name, metadata)
+    
+    # Create knowledge base entry if db provided
+    kb_id = None
+    if db and success:
+        kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files)"
+        kb = models.KnowledgeBase(
+            user_id=user_id,
+            name=kb_name,
+            source_type="local_file",
+            source_id=",".join(file_paths),  # Store file paths
+            extra_metadata={"files": file_metadata},
+            document_count=len(all_documents),
+            is_active=True
+        )
+        db.add(kb)
+        db.commit()
+        db.refresh(kb)
+        kb_id = kb.id
+    
+    return success, kb_id
 
 
 def ingest_google_drive(
     folder_id: str,
     credentials: Any,
-    user_id: str
-) -> bool:
-    """Ingest documents from Google Drive."""
+    user_id: str,
+    db: Optional[Session] = None,
+    knowledge_base_name: Optional[str] = None
+) -> Tuple[bool, Optional[int]]:
+    """
+    Ingest documents from Google Drive.
+    
+    Returns:
+        Tuple of (success, knowledge_base_id)
+    """
     from langchain_community.document_loaders import GoogleDriveLoader
     
     try:
@@ -131,18 +179,45 @@ def ingest_google_drive(
         
         collection_name = get_user_collection_name(user_id)
         metadata = {"source": "google_drive", "user_id": user_id}
-        return ingest_documents(documents, collection_name, metadata)
+        success = ingest_documents(documents, collection_name, metadata)
+        
+        # Create knowledge base entry if db provided
+        kb_id = None
+        if db and success:
+            kb_name = knowledge_base_name or f"Google Drive Folder ({folder_id})"
+            kb = models.KnowledgeBase(
+                user_id=user_id,
+                name=kb_name,
+                source_type="google_drive",
+                source_id=folder_id,
+                extra_metadata={"folder_id": folder_id},
+                document_count=len(documents),
+                is_active=True
+            )
+            db.add(kb)
+            db.commit()
+            db.refresh(kb)
+            kb_id = kb.id
+        
+        return success, kb_id
     except Exception as e:
         print(f"Error loading from Google Drive: {e}")
-        return False
+        return False, None
 
 
 def ingest_onedrive(
     folder_path: str,
     access_token: str,
-    user_id: str
-) -> bool:
-    """Ingest documents from OneDrive."""
+    user_id: str,
+    db: Optional[Session] = None,
+    knowledge_base_name: Optional[str] = None
+) -> Tuple[bool, Optional[int]]:
+    """
+    Ingest documents from OneDrive.
+    
+    Returns:
+        Tuple of (success, knowledge_base_id)
+    """
     from langchain_community.document_loaders import OneDriveLoader
     
     try:
@@ -162,8 +237,28 @@ def ingest_onedrive(
         
         collection_name = get_user_collection_name(user_id)
         metadata = {"source": "onedrive", "user_id": user_id}
-        return ingest_documents(documents, collection_name, metadata)
+        success = ingest_documents(documents, collection_name, metadata)
+        
+        # Create knowledge base entry if db provided
+        kb_id = None
+        if db and success:
+            kb_name = knowledge_base_name or f"OneDrive Folder ({folder_path})"
+            kb = models.KnowledgeBase(
+                user_id=user_id,
+                name=kb_name,
+                source_type="onedrive",
+                source_id=folder_path,
+                extra_metadata={"folder_path": folder_path},
+                document_count=len(documents),
+                is_active=True
+            )
+            db.add(kb)
+            db.commit()
+            db.refresh(kb)
+            kb_id = kb.id
+        
+        return success, kb_id
     except Exception as e:
         print(f"Error loading from OneDrive: {e}")
-        return False
+        return False, None
 
