@@ -99,7 +99,9 @@ async def upload_files(
 
         try:
             for file in files:
-                file_path = os.path.join(temp_dir, file.filename)
+                # Sanitize filename to remove NUL characters
+                sanitized_filename = file.filename.replace('\x00', '') if file.filename else "unnamed_file"
+                file_path = os.path.join(temp_dir, sanitized_filename)
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
                 file_paths.append(file_path)

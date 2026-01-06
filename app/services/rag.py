@@ -225,7 +225,24 @@ def ask_question(
             retriever, llm = retriever_llm
             
             # Get source documents
-            source_docs = retriever.get_relevant_documents(query)
+            # In LangChain 0.1.0+, retrievers are callable directly (retriever(query))
+            # Try calling directly first, then try other methods for compatibility
+            try:
+                # Try calling directly (most common in newer LangChain versions)
+                source_docs = retriever(query)
+            except (TypeError, AttributeError):
+                try:
+                    # Try invoke() method (some LangChain versions)
+                    source_docs = retriever.invoke(query)
+                except (AttributeError, TypeError):
+                    # Fallback to get_relevant_documents for older versions
+                    if hasattr(retriever, 'get_relevant_documents'):
+                        source_docs = retriever.get_relevant_documents(query)
+                    else:
+                        raise AttributeError(
+                            "Retriever does not support invoke(), direct call, or get_relevant_documents(). "
+                            "Please check your LangChain version compatibility."
+                        )
             
             # Format context from documents
             context = "\n\n".join(doc.page_content for doc in source_docs)

@@ -46,13 +46,53 @@ def ingest_documents(
         return False
     
     # Add metadata to documents if provided
+    # Sanitize metadata to remove NUL characters that can cause database errors
     if metadata:
+        sanitized_metadata = {}
+        for key, value in metadata.items():
+            if isinstance(value, str):
+                sanitized_metadata[key] = value.replace('\x00', '')
+            else:
+                sanitized_metadata[key] = value
         for doc in documents:
-            doc.metadata.update(metadata)
+            # Also sanitize existing metadata
+            sanitized_doc_metadata = {}
+            for key, value in doc.metadata.items():
+                if isinstance(value, str):
+                    sanitized_doc_metadata[key] = value.replace('\x00', '')
+                else:
+                    sanitized_doc_metadata[key] = value
+            doc.metadata = sanitized_doc_metadata
+            doc.metadata.update(sanitized_metadata)
     
     # Split documents into chunks
     splitter = get_text_splitter()
     chunks = splitter.split_documents(documents)
+    
+    # Sanitize chunks - remove NUL characters from content and metadata
+    for chunk in chunks:
+        # Sanitize content
+        if chunk.page_content:
+            chunk.page_content = chunk.page_content.replace('\x00', '')
+        
+        # Sanitize metadata (recursively handle nested structures)
+        if chunk.metadata:
+            sanitized_metadata = {}
+            for key, value in chunk.metadata.items():
+                if isinstance(value, str):
+                    sanitized_metadata[key] = value.replace('\x00', '')
+                elif isinstance(value, dict):
+                    # Handle nested dictionaries
+                    sanitized_dict = {}
+                    for k, v in value.items():
+                        if isinstance(v, str):
+                            sanitized_dict[k] = v.replace('\x00', '')
+                        else:
+                            sanitized_dict[k] = v
+                    sanitized_metadata[key] = sanitized_dict
+                else:
+                    sanitized_metadata[key] = value
+            chunk.metadata = sanitized_metadata
     
     # Create embeddings and store in PgVector
     embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
@@ -85,7 +125,9 @@ def ingest_local_files(
     file_metadata = []
     
     for file_path in file_paths:
-        if not os.path.exists(file_path):
+        # Sanitize file path - remove NUL characters and other problematic characters
+        file_path = file_path.replace('\x00', '') if file_path else ""
+        if not file_path or not os.path.exists(file_path):
             continue
             
         file_ext = os.path.splitext(file_path)[1].lower()
@@ -102,19 +144,37 @@ def ingest_local_files(
                 
             docs = loader.load()
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            # Sanitize file path for metadata storage
+            sanitized_path = file_path.replace('\x00', '')
             file_metadata.append({
-                "file_name": os.path.basename(file_path),
-                "file_path": file_path,
+                "file_name": os.path.basename(sanitized_path),
+                "file_path": sanitized_path,
                 "file_size": file_size,
                 "file_type": file_ext
             })
             
-            # Add file metadata
+            # Add file metadata and sanitize document content
+            sanitized_path = file_path.replace('\x00', '') if file_path else ""
+            sanitized_name = os.path.basename(sanitized_path) if sanitized_path else ""
             for doc in docs:
+                # Sanitize document content - remove NUL characters
+                if doc.page_content:
+                    doc.page_content = doc.page_content.replace('\x00', '')
+                
+                # Sanitize existing metadata
+                sanitized_doc_metadata = {}
+                for key, value in doc.metadata.items():
+                    if isinstance(value, str):
+                        sanitized_doc_metadata[key] = value.replace('\x00', '')
+                    else:
+                        sanitized_doc_metadata[key] = value
+                doc.metadata = sanitized_doc_metadata
+                
+                # Add new metadata (already sanitized)
                 doc.metadata.update({
                     "source": "local",
-                    "file_path": file_path,
-                    "file_name": os.path.basename(file_path),
+                    "file_path": sanitized_path,
+                    "file_name": sanitized_name,
                     "user_id": user_id
                 })
             all_documents.extend(docs)
@@ -133,12 +193,15 @@ def ingest_local_files(
     kb_id = None
     if db and success:
         kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files)"
+        # Sanitize file paths - remove NUL characters and other problematic characters
+        sanitized_paths = [path.replace('\x00', '') for path in file_paths]
+        # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
         kb = KnowledgeBase(
             user_id=user_id,
             name=kb_name,
             source_type="local_file",
-            source_id=",".join(file_paths),  # Store file paths
-            extra_metadata={"files": file_metadata},
+            source_id="local_files",  # Use a simple identifier instead of file paths
+            extra_metadata={"files": file_metadata, "file_paths": sanitized_paths},
             document_count=len(all_documents),
             is_active=True
         )

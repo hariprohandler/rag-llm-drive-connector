@@ -16,8 +16,9 @@ const DocumentsPage = () => {
   // File browser state
   const [googleFiles, setGoogleFiles] = useState([]);
   const [microsoftFiles, setMicrosoftFiles] = useState([]);
+  const [localFiles, setLocalFiles] = useState([]);
   const [selectedItems, setSelectedItems] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState({ google: null, microsoft: "/" });
+  const [currentFolder, setCurrentFolder] = useState({ google: null, microsoft: "/", local: null });
   const [loadingFiles, setLoadingFiles] = useState(false);
   
   // Ingestion task state
@@ -26,7 +27,11 @@ const DocumentsPage = () => {
 
   // Check connection status on mount and tab change
   useEffect(() => {
-    checkConnectionStatus();
+    if (activeTab === "local") {
+      loadLocalFiles();
+    } else {
+      checkConnectionStatus();
+    }
   }, [activeTab]);
 
   // Poll task progress if active
@@ -103,6 +108,21 @@ const DocumentsPage = () => {
       setStatus({
         type: "error",
         message: `Error loading files: ${e.message}`,
+      });
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const loadLocalFiles = async () => {
+    setLoadingFiles(true);
+    try {
+      const result = await api.listLocalFiles();
+      setLocalFiles(result.files || []);
+    } catch (e) {
+      setStatus({
+        type: "error",
+        message: `Error loading local files: ${e.message}`,
       });
     } finally {
       setLoadingFiles(false);
@@ -201,6 +221,9 @@ const DocumentsPage = () => {
         type: "success",
         message: `Successfully uploaded and ingested ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id}`,
       });
+      
+      // Reload local files after upload
+      await loadLocalFiles();
       
       setTimeout(() => {
         setUploadProgress(0);

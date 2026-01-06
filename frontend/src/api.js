@@ -73,6 +73,7 @@ export const api = {
     request("/api/drive/ingest/microsoft", { method: "POST", body: JSON.stringify(body) }),
   getIngestionTaskStatus: (taskId) =>
     request(`/api/drive/task/${taskId}`),
+  listLocalFiles: () => request("/api/knowledge-bases/local/files"),
 };
 
 
