@@ -56,7 +56,9 @@ k8s-manifests/
 data/
 *.pdf
 *.docx
+# Exclude text files but keep requirements.txt
 *.txt
+!requirements.txt
 *.csv
 
 # Logs

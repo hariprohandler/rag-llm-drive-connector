@@ -46,8 +46,26 @@ docker-build: ## Build Docker image
 docker-run: ## Run Docker container
 	docker run -d --name rag-app -p 8000:8000 -p 7860:7860 --env-file .env rag-llm-drive-connector:latest
 
-docker-compose-up: ## Start services with docker-compose
+docker-compose-up: ## Start services with docker-compose (includes PostgreSQL and MongoDB)
 	docker-compose up -d
+
+docker-compose-up-local: ## Start app only, using local PostgreSQL and MongoDB
+	@echo "Note: Make sure PostgreSQL and MongoDB are running on your local machine"
+	@echo "The app container will connect to them via host.docker.internal"
+	@if [ ! -f requirements.txt ]; then \
+		echo "Error: requirements.txt not found in current directory"; \
+		exit 1; \
+	fi
+	@if [ -f .env.development ]; then \
+		echo "Loading environment from .env.development"; \
+		export $$(grep -v '^#' .env.development | grep -v '^$$' | xargs) && \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development build app && \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development up -d --no-deps app; \
+	else \
+		echo "Warning: .env.development not found, using default .env"; \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml build app && \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps app; \
+	fi
 
 docker-compose-down: ## Stop docker-compose services
 	docker-compose down

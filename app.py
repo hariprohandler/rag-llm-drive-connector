@@ -131,7 +131,7 @@ async def google_callback(
     request: Request,
     code: str = Query(...),
     state: str = Query(...),
-    db: Session = Depends(models.get_db)
+    db: Session = Depends(get_db)
 ):
     """Handle Google OAuth callback."""
     try:
@@ -160,7 +160,7 @@ async def microsoft_callback(
     request: Request,
     code: str = Query(...),
     state: str = Query(...),
-    db: Session = Depends(models.get_db)
+    db: Session = Depends(get_db)
 ):
     """Handle Microsoft OAuth callback."""
     try:
@@ -760,7 +760,7 @@ def create_gradio_interface():
                 user_id = payload.get("sub")
                 
                 # Create database session for Gradio
-                db = next(models.get_db())
+                db = next(get_db())
                 try:
                     file_paths = [f.name for f in files if f]
                     success, kb_id = ingest_local_files(

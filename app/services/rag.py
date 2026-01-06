@@ -3,7 +3,11 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
 from langchain_community.vectorstores.pgvector import PGVector
-from langchain.chains import RetrievalQA
+# Use LangChain Expression Language (LCEL) for RAG - compatible with LangChain 0.1.0+
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+USE_NEW_API = True
 from langchain_core.language_models.chat_models import BaseChatModel
 from typing import List, Dict, Any, Optional
 from fastapi import Request, HTTPException
@@ -101,21 +105,13 @@ def get_qa_chain(
         use_rag: Whether to use RAG (if False, just uses LLM without retrieval)
     """
     if use_rag:
+        # Return retriever and LLM separately - we'll create the chain when needed
         vectorstore = get_vectorstore(collection_name)
-        
         retriever = vectorstore.as_retriever(
             search_type="similarity",
             search_kwargs={"k": settings.retrieval_k}
         )
-        
-        qa = RetrievalQA.from_chain_type(
-            llm=llm,
-            retriever=retriever,
-            chain_type="stuff",
-            return_source_documents=True
-        )
-        
-        return qa, True
+        return (retriever, llm), True
     else:
         # For non-RAG queries, we'll use the LLM directly
         # We'll create a simple chain that just passes the query
@@ -222,18 +218,33 @@ def ask_question(
             temp_config.api_key = decrypted_key
             llm = get_llm_from_config(temp_config)
         
-        # Get QA chain
-        qa_chain, is_rag = get_qa_chain(collection_name, llm, use_rag)
+        # Get retriever and LLM
+        retriever_llm, is_rag = get_qa_chain(collection_name, llm, use_rag)
         
         if is_rag:
-            result = qa_chain({"query": query})
-            answer = result["result"]
+            retriever, llm = retriever_llm
+            
+            # Get source documents
+            source_docs = retriever.get_relevant_documents(query)
+            
+            # Format context from documents
+            context = "\n\n".join(doc.page_content for doc in source_docs)
+            
+            # Create prompt and invoke LLM
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", "You are a helpful assistant. Use the following context to answer the question. If you don't know the answer, say so.\n\nContext: {context}"),
+                ("human", "{question}")
+            ])
+            
+            chain = prompt | llm | StrOutputParser()
+            answer = chain.invoke({"context": context, "question": query})
+            
             sources = [
                 {
-                    "content": doc.page_content[:200] + "...",
+                    "content": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
                     "metadata": doc.metadata
                 }
-                for doc in result.get("source_documents", [])
+                for doc in source_docs
             ]
         else:
             # Direct LLM query without RAG

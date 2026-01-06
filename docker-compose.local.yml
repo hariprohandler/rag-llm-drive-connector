@@ -1,0 +1,29 @@
+# Override file for using local PostgreSQL and MongoDB instead of Docker containers
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d
+
+version: '3.8'
+
+services:
+  app:
+    environment:
+      # Override to use local databases via host.docker.internal
+      # On Linux, you may need to use network_mode: host instead
+      - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
+      - MONGODB_URL=mongodb://host.docker.internal:${MONGODB_PORT:-27017}
+      # Pass through all other environment variables from .env.development
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-http://localhost:8000/auth/google/callback}
+      - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
+      - MICROSOFT_CLIENT_SECRET=${MICROSOFT_CLIENT_SECRET:-}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-}
+      - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-http://localhost:8000/auth/onedrive/callback}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    # Remove dependencies on postgres and mongodb since we're using local databases
+    depends_on: []
+    # For Linux, uncomment the line below if host.docker.internal doesn't work:
+    # network_mode: host
+    # And change DATABASE_URL/MONGODB_URL to use localhost instead of host.docker.internal

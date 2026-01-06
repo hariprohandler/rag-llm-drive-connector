@@ -76,7 +76,6 @@ test_*.db
 data/
 *.pdf
 *.docx
-*.txt
 
 # Database
 *.sql
@@ -114,6 +113,8 @@ conda-meta/
 # Docker
 .dockerignore
 docker-compose.override.yml
+# Note: docker-compose.local.yml is committed as an example
+# Create docker-compose.override.yml locally if you want to override settings
 
 # Temporary files
 tmp/
