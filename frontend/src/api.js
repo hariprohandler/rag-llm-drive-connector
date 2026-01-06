@@ -74,6 +74,15 @@ export const api = {
   getIngestionTaskStatus: (taskId) =>
     request(`/api/drive/task/${taskId}`),
   listLocalFiles: () => request("/api/knowledge-bases/local/files"),
+  // Chat conversations
+  listConversations: () => request("/api/chat/conversations"),
+  getConversation: (conversationId) => request(`/api/chat/conversations/${conversationId}`),
+  createConversation: (body) => request("/api/chat/conversations", { method: "POST", body: JSON.stringify(body) }),
+  deleteConversation: (conversationId) => request(`/api/chat/conversations/${conversationId}`, { method: "DELETE" }),
+  // Knowledge bases (for file tracking)
+  listKnowledgeBases: () => request("/api/knowledge-bases"),
+  getKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`),
+  deleteKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`, { method: "DELETE" }),
 };
 
 

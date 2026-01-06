@@ -116,13 +116,39 @@ def ingest_local_files(
     """
     Ingest local files (PDFs, text files, etc.).
     
+    Files are stored in the 'knowledge_bases' table with:
+    - source_type = 'local_file'
+    - extra_metadata contains file information (file_name, file_path, file_size, etc.)
+    
     Returns:
         Tuple of (success, knowledge_base_id)
     """
     from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader
+    import hashlib
     
     all_documents = []
     file_metadata = []
+    duplicate_files = []
+    
+    # Check for duplicate files by comparing file name and size
+    existing_kbs = []
+    if db:
+        existing_kbs = db.query(KnowledgeBase).filter(
+            KnowledgeBase.user_id == user_id,
+            KnowledgeBase.source_type == "local_file",
+            KnowledgeBase.is_active == True
+        ).all()
+    
+    # Build a set of existing files (name + size) for duplicate detection
+    existing_files = set()
+    for kb in existing_kbs:
+        if kb.extra_metadata and "files" in kb.extra_metadata:
+            for file_info in kb.extra_metadata["files"]:
+                file_key = (file_info.get("file_name", ""), file_info.get("file_size", 0))
+                existing_files.add(file_key)
+    
+    # Track files in current batch to detect duplicates within the batch
+    current_batch_files = set()
     
     for file_path in file_paths:
         # Sanitize file path - remove NUL characters and other problematic characters
@@ -146,12 +172,26 @@ def ingest_local_files(
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
             # Sanitize file path for metadata storage
             sanitized_path = file_path.replace('\x00', '')
+            file_name = os.path.basename(sanitized_path)
+            
+            # Check for duplicate file (same name and size)
+            file_key = (file_name, file_size)
+            is_duplicate = file_key in existing_files
+            
             file_metadata.append({
-                "file_name": os.path.basename(sanitized_path),
+                "file_name": file_name,
                 "file_path": sanitized_path,
                 "file_size": file_size,
-                "file_type": file_ext
+                "file_type": file_ext,
+                "is_duplicate": is_duplicate
             })
+            
+            if is_duplicate:
+                duplicate_files.append(file_name)
+                # Mark documents as duplicate in metadata
+                for doc in docs:
+                    doc.metadata["is_duplicate"] = True
+                    doc.metadata["duplicate_note"] = f"Duplicate copy of {file_name}"
             
             # Add file metadata and sanitize document content
             sanitized_path = file_path.replace('\x00', '') if file_path else ""
@@ -192,7 +232,12 @@ def ingest_local_files(
     # Create knowledge base entry if db provided
     kb_id = None
     if db and success:
-        kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files)"
+        # Build knowledge base name with duplicate indicator if needed
+        duplicate_note = ""
+        if duplicate_files:
+            duplicate_note = f" ({len(duplicate_files)} duplicate file(s): {', '.join(duplicate_files[:3])}{'...' if len(duplicate_files) > 3 else ''})"
+        
+        kb_name = knowledge_base_name or f"Local Files ({len(file_paths)} files){duplicate_note}"
         # Sanitize file paths - remove NUL characters and other problematic characters
         sanitized_paths = [path.replace('\x00', '') for path in file_paths]
         # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
@@ -201,7 +246,12 @@ def ingest_local_files(
             name=kb_name,
             source_type="local_file",
             source_id="local_files",  # Use a simple identifier instead of file paths
-            extra_metadata={"files": file_metadata, "file_paths": sanitized_paths},
+            extra_metadata={
+                "files": file_metadata, 
+                "file_paths": sanitized_paths,
+                "has_duplicates": len(duplicate_files) > 0,
+                "duplicate_files": duplicate_files
+            },
             document_count=len(all_documents),
             is_active=True
         )

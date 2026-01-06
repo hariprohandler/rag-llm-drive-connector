@@ -17,6 +17,7 @@ const DocumentsPage = () => {
   const [googleFiles, setGoogleFiles] = useState([]);
   const [microsoftFiles, setMicrosoftFiles] = useState([]);
   const [localFiles, setLocalFiles] = useState([]);
+  const [knowledgeBases, setKnowledgeBases] = useState([]); // Track uploaded files
   const [selectedItems, setSelectedItems] = useState([]);
   const [currentFolder, setCurrentFolder] = useState({ google: null, microsoft: "/", local: null });
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -29,6 +30,7 @@ const DocumentsPage = () => {
   useEffect(() => {
     if (activeTab === "local") {
       loadLocalFiles();
+      loadKnowledgeBases(); // Load uploaded files tracking
     } else {
       checkConnectionStatus();
     }
@@ -129,6 +131,37 @@ const DocumentsPage = () => {
     }
   };
 
+  const loadKnowledgeBases = async () => {
+    try {
+      const kbs = await api.listKnowledgeBases();
+      // Filter for local file knowledge bases
+      const localKBs = kbs.filter(kb => kb.source_type === "local_file");
+      setKnowledgeBases(localKBs);
+    } catch (e) {
+      console.error("Error loading knowledge bases:", e);
+    }
+  };
+
+  const deleteKnowledgeBase = async (kbId) => {
+    if (!confirm("Are you sure you want to delete this knowledge base and all its documents?")) {
+      return;
+    }
+    try {
+      await api.deleteKnowledgeBase(kbId);
+      await loadKnowledgeBases();
+      await loadLocalFiles();
+      setStatus({
+        type: "success",
+        message: "Knowledge base deleted successfully",
+      });
+    } catch (e) {
+      setStatus({
+        type: "error",
+        message: `Error deleting knowledge base: ${e.message}`,
+      });
+    }
+  };
+
   const toggleItemSelection = (item) => {
     setSelectedItems((prev) => {
       const exists = prev.find((i) => i.id === item.id);
@@ -222,8 +255,9 @@ const DocumentsPage = () => {
         message: `Successfully uploaded and ingested ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id}`,
       });
       
-      // Reload local files after upload
+      // Reload local files and knowledge bases after upload
       await loadLocalFiles();
+      await loadKnowledgeBases();
       
       setTimeout(() => {
         setUploadProgress(0);
@@ -403,6 +437,108 @@ const DocumentsPage = () => {
               </span>
             </label>
           </div>
+
+          {/* Uploaded Files History */}
+          {knowledgeBases.length > 0 && (
+            <div className="card fade-in-up" style={{ marginTop: "var(--spacing-lg)" }}>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "var(--spacing-lg)", color: "var(--text-primary)" }}>
+                Uploaded Files History ({knowledgeBases.length})
+              </h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)" }}>
+                {knowledgeBases.map((kb) => (
+                  <div
+                    key={kb.id}
+                    className="fade-in-up hover-lift"
+                    style={{
+                      padding: "var(--spacing-md)",
+                      background: kb.extra_metadata?.has_duplicates ? "var(--warning-light)" : "var(--gray-50)",
+                      borderRadius: "var(--radius-md)",
+                      border: `1px solid ${kb.extra_metadata?.has_duplicates ? "var(--warning)" : "var(--gray-200)"}`,
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--spacing-sm)" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", marginBottom: "var(--spacing-xs)" }}>
+                          <div style={{ fontWeight: 600, fontSize: "1rem" }}>
+                            📁 {kb.name}
+                          </div>
+                          {kb.extra_metadata?.has_duplicates && (
+                            <span
+                              style={{
+                                padding: "2px var(--spacing-xs)",
+                                background: "var(--warning)",
+                                color: "var(--text-inverse)",
+                                borderRadius: "var(--radius-full)",
+                                fontSize: "0.75rem",
+                                fontWeight: 500,
+                              }}
+                            >
+                              ⚠️ Duplicate
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
+                          {kb.document_count || 0} documents • Created {new Date(kb.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteKnowledgeBase(kb.id)}
+                        className="btn btn-danger"
+                        style={{ padding: "var(--spacing-xs) var(--spacing-md)", fontSize: "0.75rem" }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    {kb.extra_metadata?.files && kb.extra_metadata.files.length > 0 && (
+                      <div style={{ marginTop: "var(--spacing-sm)", borderTop: "1px solid var(--gray-200)", paddingTop: "var(--spacing-sm)" }}>
+                        <p style={{ fontWeight: 500, marginBottom: "var(--spacing-xs)", fontSize: "0.875rem" }}>Files:</p>
+                        <ul style={{ listStyle: "none", paddingLeft: 0, margin: 0 }}>
+                          {kb.extra_metadata.files.map((file, fileIndex) => (
+                            <li
+                              key={fileIndex}
+                              style={{
+                                fontSize: "0.875rem",
+                                color: file.is_duplicate ? "var(--warning)" : "var(--text-tertiary)",
+                                marginBottom: "var(--spacing-xs)",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "var(--spacing-xs)",
+                              }}
+                            >
+                              <span>📄</span>
+                              <span>{file.file_name}</span>
+                              <span style={{ color: "var(--text-secondary)" }}>
+                                ({Math.round(file.file_size / 1024)} KB)
+                              </span>
+                              {file.is_duplicate && (
+                                <span
+                                  style={{
+                                    padding: "2px var(--spacing-xs)",
+                                    background: "var(--warning)",
+                                    color: "var(--text-inverse)",
+                                    borderRadius: "var(--radius-full)",
+                                    fontSize: "0.75rem",
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  duplicate copy
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {kb.extra_metadata?.duplicate_files && kb.extra_metadata.duplicate_files.length > 0 && (
+                      <div style={{ marginTop: "var(--spacing-sm)", padding: "var(--spacing-sm)", background: "var(--warning-light)", borderRadius: "var(--radius-sm)", fontSize: "0.875rem", color: "var(--warning-dark)" }}>
+                        ⚠️ Duplicate files detected: {kb.extra_metadata.duplicate_files.join(", ")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
