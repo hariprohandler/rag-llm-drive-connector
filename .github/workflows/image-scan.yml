@@ -1,45 +1,45 @@
-name: Docker Image Security Scan
+# name: Docker Image Security Scan
 
-on:
-  push:
-    branches:
-      - main
-      - develop
-    tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
+# on:
+#   push:
+#     branches:
+#       - main
+#       - develop
+#     tags:
+#       - 'v*'
+#   pull_request:
+#     branches:
+#       - main
 
-jobs:
-  scan:
-    name: Scan Docker Image
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+# jobs:
+#   scan:
+#     name: Scan Docker Image
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
 
-      - name: Build image
-        run: docker build -t rag-app:test .
+#       - name: Build image
+#         run: docker build -t rag-app:test .
 
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'rag-app:test'
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+#       - name: Run Trivy vulnerability scanner
+#         uses: aquasecurity/trivy-action@master
+#         with:
+#           image-ref: 'rag-app:test'
+#           format: 'table'
+#           exit-code: '1'
+#           severity: 'CRITICAL,HIGH'
 
-      - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-fs-results.sarif'
+#       - name: Run Trivy filesystem scan
+#         uses: aquasecurity/trivy-action@master
+#         with:
+#           scan-type: 'fs'
+#           scan-ref: '.'
+#           format: 'sarif'
+#           output: 'trivy-fs-results.sarif'
 
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-fs-results.sarif'
+#       - name: Upload Trivy results to GitHub Security
+#         uses: github/codeql-action/upload-sarif@v3
+#         with:
+#           sarif_file: 'trivy-fs-results.sarif'
 

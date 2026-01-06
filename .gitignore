@@ -23,10 +23,11 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment variables
+# Environment variables - NEVER commit these!
 .env
-.env.local
-.env.*.local
+.env.production
+# Allow .env.example as a template
+!.env.example
 
 # IDE
 .vscode/
@@ -35,10 +36,18 @@ wheels/
 *.swo
 *~
 
-# OAuth credentials
+# OAuth credentials and API keys
 credentials.json
 client_secret.json
 client_id.json
+*_credentials.json
+*_secret.json
+*_key.json
+secrets/
+*.pem
+*.key
+*.crt
+*.cert
 
 # Kubernetes secrets (never commit!)
 k8s/secret.yaml
@@ -68,8 +77,25 @@ data/
 *.docx
 *.txt
 
+# Database
+*.sql
+*.sqlite
+*.sqlite3
+*.db
+!test.db  # Allow test.db for testing if needed
+postgres_data/
+mongodb_data/
+
 # Logs
 *.log
+*.log.*
+logs/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*~
 
 # OS
 .DS_Store
@@ -79,3 +105,29 @@ Thumbs.db
 .conda/
 conda-meta/
 *.conda
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Type checking
+.pytype/
+
+# Encryption keys (if stored locally)
+*.key
+encryption_key.txt

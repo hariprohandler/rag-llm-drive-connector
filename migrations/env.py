@@ -24,7 +24,13 @@ if env_path.exists():
 if "OPENAI_API_KEY" not in os.environ:
     os.environ["OPENAI_API_KEY"] = "dummy-for-migrations"
 
+# Import Base and all models so Alembic can detect them
 from app.models import Base
+# Import all models to register them with Base.metadata
+from app.models.user import User
+from app.models.llm_config import LLMConfig
+from app.models.knowledge_base import KnowledgeBase
+from app.models.chat import ChatConversation, ChatMessage
 from app.core.config import settings
 
 # this is the Alembic Config object, which provides
@@ -32,7 +38,16 @@ from app.core.config import settings
 config = context.config
 
 # Set the database URL from our config (uses .env via pydantic-settings)
-database_url = settings.database_url.replace("postgresql+psycopg2://", "postgresql://")
+# Convert various postgres URL formats to postgresql:// for SQLAlchemy
+def normalize_db_url(url: str) -> str:
+    """Normalize database URL to postgresql:// format for SQLAlchemy."""
+    if url.startswith("postgresql+psycopg2://"):
+        return url.replace("postgresql+psycopg2://", "postgresql://")
+    elif url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://")
+    return url
+
+database_url = normalize_db_url(settings.database_url)
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.

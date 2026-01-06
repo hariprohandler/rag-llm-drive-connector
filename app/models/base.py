@@ -6,9 +6,18 @@ from app.core.config import settings
 
 Base = declarative_base()
 
+# Helper function to normalize database URL
+def normalize_db_url(url: str) -> str:
+    """Normalize database URL to postgresql:// format for SQLAlchemy."""
+    if url.startswith("postgresql+psycopg2://"):
+        return url.replace("postgresql+psycopg2://", "postgresql://")
+    elif url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://")
+    return url
+
 # Master database engine (for writes)
 master_engine = create_engine(
-    settings.database_url.replace("postgresql+psycopg2://", "postgresql://"),
+    normalize_db_url(settings.database_url),
     pool_pre_ping=True,
     pool_recycle=3600,
     pool_size=10,
@@ -18,7 +27,7 @@ master_engine = create_engine(
 # Slave database engine (for reads) - falls back to master if not configured
 slave_engine = (
     create_engine(
-        settings.database_read_url.replace("postgresql+psycopg2://", "postgresql://"),
+        normalize_db_url(settings.database_read_url),
         pool_pre_ping=True,
         pool_recycle=3600,
         pool_size=10,

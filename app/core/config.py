@@ -1,7 +1,40 @@
 """Configuration settings for the RAG application."""
 import os
+import logging
 from pydantic_settings import BaseSettings
 from typing import Optional
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def get_env_files() -> list[str]:
+    """
+    Determine which environment files to load based on ENVIRONMENT variable.
+    
+    Priority order (later files override earlier ones):
+    1. .env (base configuration)
+    2. .env.{ENVIRONMENT} (environment-specific, e.g., .env.development, .env.production)
+    
+    If ENVIRONMENT is not set, only .env is loaded.
+    """
+    env_files = [".env"]  # Always load base .env first
+    
+    # Get environment from environment variable (not from .env file)
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    
+    if environment:
+        env_file = f".env.{environment}"
+        env_path = Path(env_file)
+        if env_path.exists():
+            env_files.append(env_file)
+            logger.info(f"Loading environment-specific config from: {env_file}")
+        else:
+            logger.warning(f"Environment file {env_file} not found, using .env only")
+    else:
+        logger.info("ENVIRONMENT variable not set, using .env only")
+    
+    return env_files
 
 
 class Settings(BaseSettings):
@@ -61,8 +94,9 @@ class Settings(BaseSettings):
     ]
     
     class Config:
-        env_file = ".env"
+        env_file = get_env_files()
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields from .env files (e.g., Docker Compose variables)
 
 
 settings = Settings()

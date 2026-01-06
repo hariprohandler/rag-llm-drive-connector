@@ -1,4 +1,4 @@
-.PHONY: help install test lint format docker-build docker-run docker-compose-up docker-compose-down k8s-deploy k8s-delete clean
+.PHONY: help install test lint format docker-build docker-run docker-compose-up docker-compose-down setup-db migrate migrate-create migrate-rollback migrate-status k8s-deploy k8s-delete clean
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -57,6 +57,39 @@ docker-compose-logs: ## View docker-compose logs
 
 setup-db: ## Setup database
 	python setup_db.py
+
+migrate: ## Run database migrations (supports ENVIRONMENT variable)
+	@if [ -n "$$ENVIRONMENT" ]; then \
+		echo "Running migrations for environment: $$ENVIRONMENT"; \
+		ENVIRONMENT=$$ENVIRONMENT alembic upgrade head; \
+	else \
+		echo "Running migrations (using default .env)"; \
+		alembic upgrade head; \
+	fi
+
+migrate-create: ## Create a new migration (usage: make migrate-create MESSAGE="description")
+	@if [ -n "$$ENVIRONMENT" ]; then \
+		ENVIRONMENT=$$ENVIRONMENT alembic revision --autogenerate -m "$(MESSAGE)"; \
+	else \
+		alembic revision --autogenerate -m "$(MESSAGE)"; \
+	fi
+
+migrate-rollback: ## Rollback last migration
+	@if [ -n "$$ENVIRONMENT" ]; then \
+		ENVIRONMENT=$$ENVIRONMENT alembic downgrade -1; \
+	else \
+		alembic downgrade -1; \
+	fi
+
+migrate-status: ## Show migration status
+	@if [ -n "$$ENVIRONMENT" ]; then \
+		echo "Migration status for environment: $$ENVIRONMENT"; \
+		ENVIRONMENT=$$ENVIRONMENT alembic current; \
+		ENVIRONMENT=$$ENVIRONMENT alembic history; \
+	else \
+		alembic current; \
+		alembic history; \
+	fi
 
 k8s-deploy: ## Deploy to Kubernetes
 	kubectl apply -k k8s/
