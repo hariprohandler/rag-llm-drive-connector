@@ -42,7 +42,6 @@ services:
     container_name: rag-app
     ports:
       - "${APP_PORT:-8000}:8000"
-      - "${GRADIO_PORT:-7860}:7860"
     environment:
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       - MONGODB_URL=mongodb://mongodb:27017
@@ -57,7 +56,6 @@ services:
       - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-http://localhost:8000/auth/onedrive/callback}
       - HOST=0.0.0.0
       - PORT=8000
-      - GRADIO_PORT=7860
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,10 +68,18 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_BACKEND_BASE_URL=http://localhost:8000
+    depends_on:
+      app:
+        condition: service_started
 
 volumes:
   postgres_data:

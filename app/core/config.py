@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     port: int = 8000
     gradio_port: int = 7860
     
+    # Base URL for React frontend (used for post-auth redirects)
+    # Example: http://localhost:3000, https://app.my-domain.com
+    frontend_base_url: str = "http://localhost:3000"
+    
+    # Base URL for backend (used by frontend/Gradio to call API & auth endpoints)
+    # Example: http://localhost:8000, https://api.my-domain.com
+    backend_base_url: str = "http://localhost:8000"
+    
     # RAG settings
     collection_name: str = "documents"
     chunk_size: int = 1000

@@ -6,7 +6,6 @@ version: '3.8'
 services:
   app:
     # Run the existing application entrypoint
-    # (FastAPI + Gradio started from app.py)
     command: python app.py
     # Mount source code for live reload
     volumes:
@@ -34,3 +33,14 @@ services:
     # For Linux, uncomment the line below if host.docker.internal doesn't work:
     # network_mode: host
     # And change DATABASE_URL/MONGODB_URL to use localhost instead of host.docker.internal
+
+  frontend:
+    # Mount source code for live reload in development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_BACKEND_BASE_URL=http://localhost:8000
+    # Frontend depends on app service
+    depends_on:
+      - app

@@ -49,7 +49,7 @@ docker-run: ## Run Docker container
 docker-compose-up: ## Start services with docker-compose (includes PostgreSQL and MongoDB)
 	docker-compose up -d
 
-docker-compose-up-local: ## Start app only, using local PostgreSQL and MongoDB
+docker-compose-up-local: ## Start app and frontend, using local PostgreSQL and MongoDB
 	@echo "Note: Make sure PostgreSQL and MongoDB are running on your local machine"
 	@echo "The app container will connect to them via host.docker.internal"
 	@if [ ! -f requirements.txt ]; then \
@@ -59,12 +59,12 @@ docker-compose-up-local: ## Start app only, using local PostgreSQL and MongoDB
 	@if [ -f .env.development ]; then \
 		echo "Loading environment from .env.development"; \
 		export $$(grep -v '^#' .env.development | grep -v '^$$' | xargs) && \
-		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development build app && \
-		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development up -d --no-deps app; \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development build app frontend && \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml --env-file .env.development up -d app frontend; \
 	else \
 		echo "Warning: .env.development not found, using default .env"; \
-		docker-compose -f docker-compose.yml -f docker-compose.local.yml build app && \
-		docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d --no-deps app; \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml build app frontend && \
+		docker-compose -f docker-compose.yml -f docker-compose.local.yml up -d app frontend; \
 	fi
 
 docker-compose-down: ## Stop docker-compose services
