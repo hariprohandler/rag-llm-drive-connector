@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import LLMConfig
 from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
+from app.middleware.tracing import get_tracing_id
 import time
 
 
@@ -287,7 +288,8 @@ def ask_question(
             },
             ip_address=get_client_ip(request) if request else None,
             user_agent=get_user_agent(request) if request else None,
-            response_time_ms=response_time_ms
+            response_time_ms=response_time_ms,
+            tracing_id=get_tracing_id(request) if request else None
         )
         
         return {
@@ -307,6 +309,7 @@ def ask_question(
             error=str(e),
             ip_address=get_client_ip(request) if request else None,
             user_agent=get_user_agent(request) if request else None,
-            response_time_ms=response_time_ms
+            response_time_ms=response_time_ms,
+            tracing_id=get_tracing_id(request) if request else None
         )
         raise

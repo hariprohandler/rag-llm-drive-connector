@@ -1,11 +1,33 @@
 // Get backend URL from environment variable (Vite uses import.meta.env)
 export const BACKEND_BASE_URL = import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000";
 
+// Generate or retrieve tracingId from sessionStorage
+function getTracingId() {
+  let tracingId = sessionStorage.getItem("tracingId");
+  if (!tracingId) {
+    // Generate a new tracingId (UUID v4 format)
+    tracingId = crypto.randomUUID ? crypto.randomUUID() : generateUUID();
+    sessionStorage.setItem("tracingId", tracingId);
+  }
+  return tracingId;
+}
+
+// Fallback UUID generator for browsers without crypto.randomUUID
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 async function request(path, options = {}) {
+  const tracingId = getTracingId();
   const res = await fetch(`${BACKEND_BASE_URL}${path}`, {
     credentials: "include", // send cookies
     headers: {
       "Content-Type": "application/json",
+      "X-Tracing-Id": tracingId,
       ...(options.headers || {})
     },
     ...options

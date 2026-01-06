@@ -129,14 +129,25 @@ class ActivityLogger:
             self.auth_logs = self.db['auth_activities']
             self.query_logs = self.db['query_activities']
             
+            # Create general activity logs collection
+            self.activity_logs = self.db['general_activities']
+            
             # Create indexes
             self.auth_logs.create_index("user_id")
             self.auth_logs.create_index("timestamp")
             self.auth_logs.create_index("auth_action")
+            self.auth_logs.create_index("tracing_id")
             
             self.query_logs.create_index("user_id")
             self.query_logs.create_index("timestamp")
             self.query_logs.create_index("collection_name")
+            self.query_logs.create_index("tracing_id")
+            
+            self.activity_logs.create_index("user_id")
+            self.activity_logs.create_index("timestamp")
+            self.activity_logs.create_index("activity_type")
+            self.activity_logs.create_index("tracing_id")
+            self.activity_logs.create_index("endpoint")
             
         except Exception as e:
             # If MongoDB is not available, log to console (for development)
@@ -163,7 +174,8 @@ class ActivityLogger:
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None
+        user_agent: Optional[str] = None,
+        tracing_id: Optional[str] = None
     ):
         """Log authentication activity."""
         if not self.is_connected():
@@ -177,6 +189,7 @@ class ActivityLogger:
             "ip_address": ip_address,
             "user_agent": user_agent,
             "provider": provider,
+            "tracing_id": tracing_id,
         }
         
         # Sanitize and add metadata
@@ -211,7 +224,8 @@ class ActivityLogger:
         metadata: Optional[Dict[str, Any]] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
-        response_time_ms: Optional[float] = None
+        response_time_ms: Optional[float] = None,
+        tracing_id: Optional[str] = None
     ):
         """Log query activity."""
         if not self.is_connected():
@@ -225,6 +239,7 @@ class ActivityLogger:
             "collection_name": collection_name,
             "ip_address": ip_address,
             "response_time_ms": response_time_ms,
+            "tracing_id": tracing_id,
         }
         
         # Sanitize metadata (may contain file paths, etc.)
@@ -287,6 +302,60 @@ class ActivityLogger:
         except Exception as e:
             print(f"Error retrieving query logs: {e}")
             return []
+    
+    def log_activity(
+        self,
+        activity_type: str,
+        user_id: Optional[str] = None,
+        endpoint: Optional[str] = None,
+        method: Optional[str] = None,
+        status: str = "success",
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        response_time_ms: Optional[float] = None,
+        tracing_id: Optional[str] = None,
+        request_body: Optional[Dict[str, Any]] = None,
+        response_status_code: Optional[int] = None
+    ):
+        """Log general activity (all API requests)."""
+        if not self.is_connected():
+            return
+        
+        log_entry = {
+            "timestamp": datetime.utcnow(),
+            "activity_type": activity_type,  # e.g., 'file_upload', 'kb_create', 'llm_config_update', etc.
+            "user_id": user_id,
+            "endpoint": endpoint,
+            "method": method,
+            "status": status,
+            "ip_address": ip_address,
+            "response_time_ms": response_time_ms,
+            "response_status_code": response_status_code,
+            "tracing_id": tracing_id,
+        }
+        
+        # Sanitize and add metadata
+        if metadata:
+            log_entry["metadata"] = self.data_handler.sanitize_for_logging(metadata)
+        
+        # Sanitize request body if provided
+        if request_body:
+            log_entry["request_body"] = self.data_handler.sanitize_for_logging(request_body)
+        
+        # Add error if present (redacted)
+        if error:
+            log_entry["error"] = self.data_handler.redact_string(str(error))
+        
+        # Sanitize user_agent
+        if user_agent:
+            log_entry["user_agent"] = self.data_handler.redact_string(user_agent)
+        
+        try:
+            self.activity_logs.insert_one(log_entry)
+        except Exception as e:
+            print(f"Error logging activity: {e}")
     
     def close(self):
         """Close MongoDB connection."""

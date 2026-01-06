@@ -5,6 +5,7 @@ import uvicorn
 
 from app.core.config import settings
 from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes, drive_routes
+from app.middleware.tracing import TracingMiddleware
 
 # Initialize database
 from app.models.base import init_db
@@ -12,6 +13,9 @@ from app.models.base import init_db
 init_db()
 
 app = FastAPI(title="RAG LLM Drive Connector", version="1.0.0")
+
+# Tracing middleware (must be added before CORS)
+app.add_middleware(TracingMiddleware)
 
 # CORS middleware
 # Note: When allow_credentials=True, you cannot use allow_origins=["*"]

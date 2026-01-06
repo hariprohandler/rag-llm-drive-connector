@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.models import User, KnowledgeBase
 from app.models.base import get_db
 from app.services.auth_service import get_current_user
+from app.helpers.logging_helper import ActivityLogger
 
 
 router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge-bases"])
@@ -48,24 +49,41 @@ async def get_knowledge_base(
 
 @router.delete("/{kb_id}")
 async def delete_knowledge_base(
+    fastapi_request: Request,
     kb_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Soft delete a knowledge base."""
-    kb = (
-        db.query(KnowledgeBase)
-        .filter(
-            KnowledgeBase.id == kb_id,
-            KnowledgeBase.user_id == current_user.id,
-        )
-        .first()
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="kb_delete",
+        endpoint=f"/api/knowledge-bases/{kb_id}",
+        method="DELETE",
+        user_id=current_user.id,
+        metadata={"kb_id": kb_id}
     )
-    if not kb:
-        raise HTTPException(status_code=404, detail="Knowledge base not found")
-    kb.is_active = False
-    db.commit()
-    return {"status": "success", "message": "Knowledge base deleted"}
+    try:
+        kb = (
+            db.query(KnowledgeBase)
+            .filter(
+                KnowledgeBase.id == kb_id,
+                KnowledgeBase.user_id == current_user.id,
+            )
+            .first()
+        )
+        if not kb:
+            activity_logger.log_error("Knowledge base not found", 404)
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+        kb.is_active = False
+        db.commit()
+        activity_logger.log_success()
+        return {"status": "success", "message": "Knowledge base deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/local/files")
