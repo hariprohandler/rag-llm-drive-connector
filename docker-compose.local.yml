@@ -29,6 +29,9 @@ services:
       # On Linux, you may need to use network_mode: host instead
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       - MONGODB_URL=mongodb://host.docker.internal:${MONGODB_PORT:-27017}
+      # Enable auto-reload for backend code changes
+      - ENVIRONMENT=development
+      - UVICORN_RELOAD=true
       # All other environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
       # are loaded from .env.development via env_file above
     # Note: depends_on from base file remains, but postgres/mongodb won't start due to replicas: 0

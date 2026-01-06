@@ -96,8 +96,15 @@ async def readiness_check():
 
 
 if __name__ == "__main__":
+    import os
+    # Enable auto-reload in development (when running locally or in Docker with volume mounts)
+    # Check if we're in development mode (not in production)
+    reload = os.getenv("ENVIRONMENT", "").lower() in ["development", "dev", ""] or os.getenv("UVICORN_RELOAD", "false").lower() == "true"
+    
     uvicorn.run(
         app,
         host=settings.host,
-        port=settings.port
+        port=settings.port,
+        reload=reload,  # Auto-reload on code changes in development
+        reload_dirs=["./app"] if reload else None,  # Only watch app directory for changes
     )
