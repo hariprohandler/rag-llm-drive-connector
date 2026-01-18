@@ -9,7 +9,9 @@ from langchain_core.documents import Document
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from app.core.config import settings
-from app.models import KnowledgeBase
+from app.models import KnowledgeBase, UserSettings
+from app.helpers.vector_db_helper import get_collection_name, get_user_vector_db_url, get_vector_table_name
+from app.constants import DefaultValues, SourceType
 import os
 
 
@@ -21,23 +23,38 @@ def get_text_splitter() -> RecursiveCharacterTextSplitter:
     )
 
 
-def get_user_collection_name(user_id: str) -> str:
-    """Get collection name for a user."""
-    return f"user_{user_id}_documents"
+def get_user_collection_name(user_id: str, knowledge_base_id: Optional[int] = None) -> str:
+    """
+    Get collection name for a user.
+    
+    For better organization, we organize collections by knowledge base:
+    - If knowledge_base_id is provided: user_{user_id}_kb_{kb_id}
+    - Otherwise: user_{user_id}_documents (for backward compatibility)
+    """
+    return get_collection_name(user_id, knowledge_base_id)
 
 
 def ingest_documents(
     documents: List[Document],
     collection_name: str,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    db_url: Optional[str] = None,
+    source_type: Optional[str] = None
 ) -> bool:
     """
     Ingest documents into PgVector.
+    
+    For petabyte-scale performance, documents are organized by:
+    - Source type (for future table separation - currently uses collection filtering)
+    - Knowledge base ID (for fine-grained access)
+    - Collection name (for logical grouping within source tables)
     
     Args:
         documents: List of LangChain Document objects
         collection_name: Collection name for the vectorstore
         metadata: Optional metadata to add to all documents
+        db_url: Optional database URL (uses default from settings if not provided)
+        source_type: Optional source type (e.g., 'slack', 'teams', 'onedrive') for table organization
         
     Returns:
         True if successful
@@ -64,6 +81,16 @@ def ingest_documents(
                     sanitized_doc_metadata[key] = value
             doc.metadata = sanitized_doc_metadata
             doc.metadata.update(sanitized_metadata)
+    
+    # Ensure source_type is in metadata for efficient filtering
+    # This enables future table separation while maintaining backward compatibility
+    if source_type:
+        for doc in documents:
+            if "source_type" not in doc.metadata:
+                doc.metadata["source_type"] = source_type
+            # Also add for collection-based filtering (until tables are migrated)
+            if "source" not in doc.metadata:
+                doc.metadata["source"] = source_type
     
     # Split documents into chunks
     splitter = get_text_splitter()
@@ -98,16 +125,19 @@ def ingest_documents(
     # Use batch processing for faster embedding generation
     embeddings = OpenAIEmbeddings(
         openai_api_key=settings.openai_api_key,
-        chunk_size=100,  # Process embeddings in batches of 100
-        max_retries=3,
-        request_timeout=60.0
+        chunk_size=DefaultValues.EMBEDDING_BATCH_SIZE,
+        max_retries=DefaultValues.MAX_RETRIES,
+        request_timeout=DefaultValues.OPENAI_TIMEOUT
     )
+    
+    # Use user-configured DB URL if provided, otherwise use default
+    vector_db_url = db_url or settings.database_url
     
     # Use add_documents with batch processing for better performance
     # Check if collection exists, if not create it
     vectorstore = PGVector(
         collection_name=collection_name,
-        connection=settings.database_url,
+        connection=vector_db_url,
         embeddings=embeddings,
         use_jsonb=True,  # Use JSONB for metadata as recommended
     )
@@ -121,9 +151,8 @@ def ingest_documents(
         # Continue anyway - table might already exist
     
     # Add documents in batches to avoid memory issues and improve performance
-    # Batch size of 100-200 is optimal for embedding generation
-    # Larger batches = fewer API calls = faster processing
-    batch_size = 200  # Increased batch size for better performance
+    # Batch size is configured in DefaultValues for consistency
+    batch_size = DefaultValues.INGESTION_BATCH_SIZE
     total_batches = (len(chunks) + batch_size - 1) // batch_size
     
     # Use add_documents which handles batching internally for embeddings
@@ -155,7 +184,8 @@ def ingest_local_files(
     file_paths: List[str],
     user_id: str,
     db: Optional[Session] = None,
-    knowledge_base_name: Optional[str] = None
+    knowledge_base_name: Optional[str] = None,
+    knowledge_base_id: Optional[int] = None
 ) -> Tuple[bool, Optional[int]]:
     """
     Ingest local files (PDFs, text files, etc.).
@@ -271,14 +301,16 @@ def ingest_local_files(
     if not all_documents:
         return False, None
     
-    collection_name = get_user_collection_name(user_id)
-    metadata = {"source": "local", "user_id": user_id}
-    success = ingest_documents(all_documents, collection_name, metadata)
-    
-    # Create knowledge base entry if db provided
-    # IMPORTANT: Create KB even if ingestion failed, so we can track what was attempted
-    kb_id = None
+    # Get user's vector DB configuration if available
+    user_vector_db_url = None
     if db:
+        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        user_vector_db_url = get_user_vector_db_url(user_settings)
+    
+    # Create knowledge base entry first if db provided (to get kb_id for collection naming)
+    # IMPORTANT: Create KB even if ingestion might fail, so we can track what was attempted
+    kb_id = knowledge_base_id
+    if db and not kb_id:
         try:
             # Build knowledge base name with duplicate indicator if needed
             duplicate_note = ""
@@ -299,7 +331,6 @@ def ingest_local_files(
                     "file_paths": sanitized_paths,
                     "has_duplicates": len(duplicate_files) > 0,
                     "duplicate_files": duplicate_files,
-                    "ingestion_success": success
                 },
                 document_count=len(all_documents),
                 is_active=True
@@ -319,6 +350,32 @@ def ingest_local_files(
             # The documents are already in the vector DB if success=True
             # But we should still return the kb_id as None so the caller knows
     
+    # Use knowledge_base-specific collection name for better organization
+    source_type = "local_file"
+    collection_name = get_user_collection_name(user_id, kb_id)
+    metadata = {
+        "source": "local",
+        "user_id": user_id,
+        "source_type": source_type
+    }
+    # Add knowledge_base_id to metadata if available
+    if kb_id:
+        metadata["knowledge_base_id"] = kb_id
+    
+    success = ingest_documents(all_documents, collection_name, metadata, db_url=user_vector_db_url, source_type=source_type)
+    
+    # Update knowledge base with ingestion success status
+    if db and kb_id:
+        try:
+            kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+            if kb:
+                if not kb.extra_metadata:
+                    kb.extra_metadata = {}
+                kb.extra_metadata["ingestion_success"] = success
+                db.commit()
+        except Exception as e:
+            print(f"Warning: Could not update KB ingestion status: {e}")
+    
     return success, kb_id
 
 
@@ -327,7 +384,8 @@ def ingest_google_drive(
     credentials: Any,
     user_id: str,
     db: Optional[Session] = None,
-    knowledge_base_name: Optional[str] = None
+    knowledge_base_name: Optional[str] = None,
+    knowledge_base_id: Optional[int] = None
 ) -> Tuple[bool, Optional[int]]:
     """
     Ingest documents from Google Drive.
@@ -338,27 +396,15 @@ def ingest_google_drive(
     from langchain_community.document_loaders import GoogleDriveLoader
     
     try:
-        loader = GoogleDriveLoader(
-            folder_id=folder_id,
-            credentials=credentials
-        )
-        documents = loader.load()
+        # Get user's vector DB configuration if available
+        user_vector_db_url = None
+        if db:
+            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            user_vector_db_url = get_user_vector_db_url(user_settings)
         
-        # Add metadata
-        for doc in documents:
-            doc.metadata.update({
-                "source": "google_drive",
-                "folder_id": folder_id,
-                "user_id": user_id
-            })
-        
-        collection_name = get_user_collection_name(user_id)
-        metadata = {"source": "google_drive", "user_id": user_id}
-        success = ingest_documents(documents, collection_name, metadata)
-        
-        # Create knowledge base entry if db provided
-        kb_id = None
-        if db and success:
+        # Create knowledge base entry first (to get kb_id for collection naming)
+        kb_id = knowledge_base_id
+        if db and not kb_id:
             kb_name = knowledge_base_name or f"Google Drive Folder ({folder_id})"
             kb = KnowledgeBase(
                 user_id=user_id,
@@ -366,13 +412,53 @@ def ingest_google_drive(
                 source_type="google_drive",
                 source_id=folder_id,
                 extra_metadata={"folder_id": folder_id},
-                document_count=len(documents),
+                document_count=0,  # Will update after ingestion
                 is_active=True
             )
             db.add(kb)
+            db.flush()
+            kb_id = kb.id
             db.commit()
             db.refresh(kb)
-            kb_id = kb.id
+        
+        loader = GoogleDriveLoader(
+            folder_id=folder_id,
+            credentials=credentials
+        )
+        documents = loader.load()
+        
+        # Add metadata with knowledge_base_id
+        for doc in documents:
+            doc_metadata = {
+                "source": "google_drive",
+                "folder_id": folder_id,
+                "user_id": user_id,
+                "source_type": "google_drive"
+            }
+            if kb_id:
+                doc_metadata["knowledge_base_id"] = kb_id
+            doc.metadata.update(doc_metadata)
+        
+        # Use knowledge_base-specific collection name
+        source_type = SourceType.GOOGLE_DRIVE.value
+        collection_name = get_user_collection_name(user_id, kb_id)
+        metadata = {"source": "google_drive", "user_id": user_id, "source_type": source_type}
+        if kb_id:
+            metadata["knowledge_base_id"] = kb_id
+        success = ingest_documents(documents, collection_name, metadata, db_url=user_vector_db_url, source_type=source_type)
+        
+        # Update knowledge base with document count and ingestion status
+        if db and kb_id:
+            try:
+                kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+                if kb:
+                    kb.document_count = len(documents)
+                    if not kb.extra_metadata:
+                        kb.extra_metadata = {"folder_id": folder_id}
+                    kb.extra_metadata["ingestion_success"] = success
+                    db.commit()
+            except Exception as e:
+                print(f"Warning: Could not update KB: {e}")
         
         return success, kb_id
     except Exception as e:
@@ -385,7 +471,8 @@ def ingest_onedrive(
     access_token: str,
     user_id: str,
     db: Optional[Session] = None,
-    knowledge_base_name: Optional[str] = None
+    knowledge_base_name: Optional[str] = None,
+    knowledge_base_id: Optional[int] = None
 ) -> Tuple[bool, Optional[int]]:
     """
     Ingest documents from OneDrive.
@@ -396,27 +483,15 @@ def ingest_onedrive(
     from langchain_community.document_loaders import OneDriveLoader
     
     try:
-        loader = OneDriveLoader(
-            access_token=access_token,
-            folder_path=folder_path
-        )
-        documents = loader.load()
+        # Get user's vector DB configuration if available
+        user_vector_db_url = None
+        if db:
+            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            user_vector_db_url = get_user_vector_db_url(user_settings)
         
-        # Add metadata
-        for doc in documents:
-            doc.metadata.update({
-                "source": "onedrive",
-                "folder_path": folder_path,
-                "user_id": user_id
-            })
-        
-        collection_name = get_user_collection_name(user_id)
-        metadata = {"source": "onedrive", "user_id": user_id}
-        success = ingest_documents(documents, collection_name, metadata)
-        
-        # Create knowledge base entry if db provided
-        kb_id = None
-        if db and success:
+        # Create knowledge base entry first (to get kb_id for collection naming)
+        kb_id = knowledge_base_id
+        if db and not kb_id:
             kb_name = knowledge_base_name or f"OneDrive Folder ({folder_path})"
             kb = KnowledgeBase(
                 user_id=user_id,
@@ -424,13 +499,53 @@ def ingest_onedrive(
                 source_type="onedrive",
                 source_id=folder_path,
                 extra_metadata={"folder_path": folder_path},
-                document_count=len(documents),
+                document_count=0,  # Will update after ingestion
                 is_active=True
             )
             db.add(kb)
+            db.flush()
+            kb_id = kb.id
             db.commit()
             db.refresh(kb)
-            kb_id = kb.id
+        
+        loader = OneDriveLoader(
+            access_token=access_token,
+            folder_path=folder_path
+        )
+        documents = loader.load()
+        
+        # Add metadata with knowledge_base_id
+        for doc in documents:
+            doc_metadata = {
+                "source": "onedrive",
+                "folder_path": folder_path,
+                "user_id": user_id,
+                "source_type": "onedrive"
+            }
+            if kb_id:
+                doc_metadata["knowledge_base_id"] = kb_id
+            doc.metadata.update(doc_metadata)
+        
+        # Use knowledge_base-specific collection name
+        source_type = SourceType.ONEDRIVE.value
+        collection_name = get_user_collection_name(user_id, kb_id)
+        metadata = {"source": "onedrive", "user_id": user_id, "source_type": source_type}
+        if kb_id:
+            metadata["knowledge_base_id"] = kb_id
+        success = ingest_documents(documents, collection_name, metadata, db_url=user_vector_db_url, source_type=source_type)
+        
+        # Update knowledge base with document count and ingestion status
+        if db and kb_id:
+            try:
+                kb = db.query(KnowledgeBase).filter(KnowledgeBase.id == kb_id).first()
+                if kb:
+                    kb.document_count = len(documents)
+                    if not kb.extra_metadata:
+                        kb.extra_metadata = {"folder_path": folder_path}
+                    kb.extra_metadata["ingestion_success"] = success
+                    db.commit()
+            except Exception as e:
+                print(f"Warning: Could not update KB: {e}")
         
         return success, kb_id
     except Exception as e:

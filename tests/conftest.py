@@ -8,8 +8,8 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from typing import Generator
-import models
-from config import settings
+from app.models import Base, User
+from app.core.config import settings
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,7 +31,7 @@ def db_session(test_database_url):
     else:
         engine = create_engine(test_database_url)
     
-    models.Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     
     session = TestingSessionLocal()
@@ -39,7 +39,7 @@ def db_session(test_database_url):
         yield session
     finally:
         session.close()
-        models.Base.metadata.drop_all(bind=engine)
+        Base.metadata.drop_all(bind=engine)
         if test_database_url.startswith("sqlite") and os.path.exists("./test.db"):
             os.remove("./test.db")
 
@@ -47,7 +47,7 @@ def db_session(test_database_url):
 @pytest.fixture
 def test_user(db_session):
     """Create a test user."""
-    user = models.User(
+    user = User(
         id="test_google_12345",
         email="test@example.com",
         name="Test User",

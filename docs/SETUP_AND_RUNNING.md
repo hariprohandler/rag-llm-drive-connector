@@ -333,6 +333,8 @@ Settings are loaded in this order (later values override earlier ones):
 | `ENCRYPTION_KEY` | Encryption key for API keys | - |
 | `ENVIRONMENT` | Environment name (development/production) | - |
 | `LOG_LEVEL` | Logging level | INFO |
+| `FRONTEND_BASE_URL` | Base URL for React frontend | http://localhost:3000 |
+| `BACKEND_BASE_URL` | Base URL for backend API | http://localhost:8000 |
 
 ## Database Setup
 
