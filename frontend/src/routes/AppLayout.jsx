@@ -4,6 +4,7 @@ import ChatPage from "./ChatPage.jsx";
 import DocumentsPage from "./DocumentsPage.jsx";
 import SettingsPage from "./SettingsPage.jsx";
 import GeneralSettingsPage from "./GeneralSettingsPage.jsx";
+import ToolsPage from "./ToolsPage.jsx";
 import { UserContext } from "../App.jsx";
 import { useOrganization } from "../contexts/OrganizationContext.jsx";
 
@@ -34,6 +35,7 @@ const AppLayout = () => {
   const navItems = [
     { path: "/app/chat", label: "Chat", icon: "💬" },
     { path: "/app/documents", label: "Documents", icon: "📄" },
+    { path: "/app/tools", label: "Tools", icon: "🔧" },
     { path: "/app/general-settings", label: "General Settings", icon: "👤" },
     { path: "/app/settings", label: "LLM Settings", icon: "⚙️" },
   ];
@@ -299,13 +301,14 @@ const AppLayout = () => {
           >
             ☰
           </button>
-          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>RAG Chat Platform</h1>
+          <h1 style={{ fontSize: "1.25rem", fontWeight: 600 }}>Anukara</h1>
         </div>
 
         <div style={{ padding: "var(--spacing-xl)", maxWidth: "1200px", margin: "0 auto" }}>
           <Routes>
             <Route path="chat" element={<ChatPage />} />
             <Route path="documents" element={<DocumentsPage />} />
+            <Route path="tools" element={<ToolsPage />} />
             <Route path="general-settings" element={<GeneralSettingsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Routes>

@@ -14,20 +14,30 @@ const App = () => {
   const location = useLocation();
 
   useEffect(() => {
-    // Check authentication status
+    // Check authentication status only once on mount
+    let mounted = true;
     const checkAuth = async () => {
       try {
         const u = await api.me();
-        setUser(u);
+        if (mounted) {
+          setUser(u);
+        }
       } catch (error) {
         // If authentication fails, clear user state
-        setUser(null);
-        // If we're on a protected route, redirect will happen via the check below
+        if (mounted) {
+          setUser(null);
+        }
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
     checkAuth();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (loading) {
@@ -70,14 +80,17 @@ const App = () => {
     );
   }
 
-  // If not authenticated and trying to access /app -> go to /login
-  if (!user && location.pathname.startsWith("/app")) {
-    return <Navigate to="/login" replace />;
-  }
+  // Only redirect if loading is complete
+  if (!loading) {
+    // If not authenticated and trying to access /app -> go to /login
+    if (!user && location.pathname.startsWith("/app")) {
+      return <Navigate to="/login" replace />;
+    }
 
-  // If authenticated and on /login -> go to chat
-  if (user && location.pathname === "/login") {
-    return <Navigate to="/app/chat" replace />;
+    // If authenticated and on /login -> go to chat
+    if (user && location.pathname === "/login") {
+      return <Navigate to="/app/chat" replace />;
+    }
   }
 
   return (

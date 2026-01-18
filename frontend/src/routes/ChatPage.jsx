@@ -11,6 +11,10 @@ const ChatPage = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [queryType, setQueryType] = useState("ask"); // "ask" or "file"
+  const [sourceFilter, setSourceFilter] = useState("all"); // "all", "document", "zendesk"
+  const [databaseConnections, setDatabaseConnections] = useState([]);
+  const [selectedDatabaseId, setSelectedDatabaseId] = useState(null);
+  const [loadingDatabases, setLoadingDatabases] = useState(false);
   const [conversations, setConversations] = useState([]);
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const [llmConfigs, setLlmConfigs] = useState([]);
@@ -26,6 +30,7 @@ const ChatPage = () => {
   useEffect(() => {
     loadConversations();
     loadLLMConfigs();
+    loadDatabaseConnections();
   }, []);
 
   // Load messages when conversation changes
@@ -63,6 +68,25 @@ const ChatPage = () => {
     }
   };
 
+  const loadDatabaseConnections = async () => {
+    try {
+      setLoadingDatabases(true);
+      const connections = await api.listDatabaseConnections();
+      setDatabaseConnections(connections || []);
+      // Set default database (first active connection)
+      if (connections && connections.length > 0) {
+        const activeConnection = connections.find(c => c.is_active) || connections[0];
+        if (activeConnection) {
+          setSelectedDatabaseId(activeConnection.id);
+        }
+      }
+    } catch (e) {
+      console.error("Error loading database connections:", e);
+    } finally {
+      setLoadingDatabases(false);
+    }
+  };
+
   const loadConversationMessages = async (conversationId) => {
     try {
       const conversation = await api.getConversation(conversationId);
@@ -93,6 +117,13 @@ const ChatPage = () => {
     setCurrentConversationId(null);
     setMessages([]);
     setQueryType("ask"); // Default to "Ask" for new conversations
+    // Reset database selection to default (first active connection)
+    if (databaseConnections.length > 0) {
+      const activeConnection = databaseConnections.find(c => c.is_active) || databaseConnections[0];
+      if (activeConnection) {
+        setSelectedDatabaseId(activeConnection.id);
+      }
+    }
     // Keep history visible - only hide when user explicitly clicks hide button
   };
 
@@ -136,36 +167,107 @@ const ChatPage = () => {
     setLoading(true);
     setError(null);
 
-    try {
-      const res = await api.sendChatMessage({
-        content: userMessage.content,
-        conversation_id: currentConversationId,
-        use_rag: queryType === "file",
-        llm_config_id: selectedLlmId,
-      });
+    // Create placeholder for streaming response
+    const assistantMessageId = Date.now() + 1;
+    let assistantMessage = {
+      role: "assistant",
+      content: "",
+      sources: [],
+      queryType: queryType,
+      id: assistantMessageId,
+      isStreaming: true,
+    };
+    setMessages([...newMessages, assistantMessage]);
 
-      const assistantContent =
-        res.assistant_message?.content ||
-        res.result?.answer ||
-        res.answer ||
-        "No response received";
+    try {
+      let conversationId = currentConversationId;
+      let sources = [];
+      let fullAnswer = "";
+
+      await api.sendChatMessage(
+        {
+          content: userMessage.content,
+          conversation_id: currentConversationId,
+          use_rag: queryType === "file",
+          llm_config_id: selectedLlmId,
+          source_filter: queryType === "file" ? sourceFilter : null,
+          database_connection_id: selectedDatabaseId || null,
+        },
+        (data) => {
+          // Handle streaming data
+          if (data.type === "token") {
+            fullAnswer += data.content;
+            // Update the assistant message in real-time
+            setMessages((prev) => {
+              const updated = [...prev];
+              const msgIndex = updated.findIndex((m) => m.id === assistantMessageId);
+              if (msgIndex !== -1) {
+                updated[msgIndex] = {
+                  ...updated[msgIndex],
+                  content: fullAnswer,
+                };
+              }
+              return updated;
+            });
+          } else if (data.type === "sources") {
+            sources = data.sources || [];
+            setMessages((prev) => {
+              const updated = [...prev];
+              const msgIndex = updated.findIndex((m) => m.id === assistantMessageId);
+              if (msgIndex !== -1) {
+                updated[msgIndex] = {
+                  ...updated[msgIndex],
+                  sources: sources,
+                };
+              }
+              return updated;
+            });
+          } else if (data.type === "done") {
+            // Final update
+            if (data.conversation_id && !conversationId) {
+              conversationId = data.conversation_id;
+              setCurrentConversationId(conversationId);
+              loadConversations();
+            }
+            setMessages((prev) => {
+              const updated = [...prev];
+              const msgIndex = updated.findIndex((m) => m.id === assistantMessageId);
+              if (msgIndex !== -1) {
+                updated[msgIndex] = {
+                  ...updated[msgIndex],
+                  content: data.answer || fullAnswer,
+                  sources: data.sources || sources,
+                  isStreaming: false,
+                };
+              }
+              return updated;
+            });
+            setLoading(false);
+          } else if (data.type === "error") {
+            setError(data.error || "An error occurred");
+            setMessages((prev) => {
+              const updated = [...prev];
+              const msgIndex = updated.findIndex((m) => m.id === assistantMessageId);
+              if (msgIndex !== -1) {
+                updated[msgIndex] = {
+                  ...updated[msgIndex],
+                  content: `Error: ${data.error || "An error occurred"}`,
+                  isError: true,
+                  isStreaming: false,
+                };
+              }
+              return updated;
+            });
+            setLoading(false);
+          }
+        }
+      );
 
       // Update conversation ID if this was a new conversation
-      if (res.conversation_id && !currentConversationId) {
-        setCurrentConversationId(res.conversation_id);
+      if (conversationId && !currentConversationId) {
+        setCurrentConversationId(conversationId);
         await loadConversations();
       }
-
-      setMessages([
-        ...newMessages,
-        {
-          role: "assistant",
-          content: assistantContent,
-          sources: res.sources || [],
-          queryType: queryType,
-          id: Date.now() + 1,
-        },
-      ]);
     } catch (e) {
       console.error("Chat error:", e);
       let errorMessage = "An error occurred";
@@ -203,17 +305,21 @@ const ChatPage = () => {
       }
 
       setError(errorMessage);
-      setMessages([
-        ...newMessages,
-        {
-          role: "assistant",
-          content: `Error: ${errorMessage}`,
-          isError: true,
-          id: Date.now() + 1,
-        },
-      ]);
-    } finally {
+      setMessages((prev) => {
+        const updated = [...prev];
+        const msgIndex = updated.findIndex((m) => m.id === assistantMessageId);
+        if (msgIndex !== -1) {
+          updated[msgIndex] = {
+            ...updated[msgIndex],
+            content: `Error: ${errorMessage}`,
+            isError: true,
+            isStreaming: false,
+          };
+        }
+        return updated;
+      });
       setLoading(false);
+    } finally {
       inputRef.current?.focus();
     }
   };
@@ -477,7 +583,23 @@ const ChatPage = () => {
                     <div style={{ fontWeight: 600, marginBottom: "var(--spacing-xs)", fontSize: "0.875rem" }}>
                       {m.role === "user" ? "You" : "Assistant"}
                     </div>
-                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{m.content}</div>
+                    <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+                      {m.content}
+                      {m.isStreaming && (
+                        <span
+                          style={{
+                            display: "inline-block",
+                            width: "8px",
+                            height: "16px",
+                            background: "currentColor",
+                            marginLeft: "2px",
+                            animation: "blink 1s infinite",
+                          }}
+                        >
+                          |
+                        </span>
+                      )}
+                    </div>
                     {m.queryType && (
                       <div
                         style={{
@@ -503,7 +625,25 @@ const ChatPage = () => {
                           opacity: 0.8,
                         }}
                       >
-                        <strong>Sources:</strong> {m.sources.length} document(s)
+                        <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", marginBottom: "var(--spacing-xs)" }}>
+                          <span>📚</span>
+                          <strong>Sources ({m.sources.length}):</strong>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-xs)", marginLeft: "1.5rem" }}>
+                          {m.sources.map((source, idx) => {
+                            const sourceType = source.metadata?.source || "document";
+                            const sourceIcon = sourceType === "zendesk" ? "🎫" : "📄";
+                            const sourceName = source.metadata?.file_name || source.metadata?.ticket_id || `Source ${idx + 1}`;
+                            return (
+                              <div key={idx} style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}>
+                                <span>{sourceIcon}</span>
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {sourceName}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -665,6 +805,143 @@ const ChatPage = () => {
                 📄 RAG Search
               </button>
             </div>
+
+            {/* Source Filter - Only show when RAG Search is selected */}
+            {queryType === "file" && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-xs)",
+                  padding: "4px",
+                  background: "var(--gray-100)",
+                  borderRadius: "var(--radius-md)",
+                  width: "fit-content",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter("all")}
+                  style={{
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    cursor: "pointer",
+                    transition: "all var(--transition-base)",
+                    background: sourceFilter === "all" ? "var(--primary)" : "transparent",
+                    color: sourceFilter === "all" ? "var(--text-inverse)" : "var(--text-secondary)",
+                    boxShadow: sourceFilter === "all" ? "var(--shadow-sm)" : "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--spacing-xs)",
+                  }}
+                  title="Search all sources"
+                >
+                  <span>🌐</span>
+                  <span>All</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter("document")}
+                  style={{
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    cursor: "pointer",
+                    transition: "all var(--transition-base)",
+                    background: sourceFilter === "document" ? "var(--primary)" : "transparent",
+                    color: sourceFilter === "document" ? "var(--text-inverse)" : "var(--text-secondary)",
+                    boxShadow: sourceFilter === "document" ? "var(--shadow-sm)" : "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--spacing-xs)",
+                  }}
+                  title="Search documents only"
+                >
+                  <span>📄</span>
+                  <span>Documents</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSourceFilter("zendesk")}
+                  style={{
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    cursor: "pointer",
+                    transition: "all var(--transition-base)",
+                    background: sourceFilter === "zendesk" ? "var(--primary)" : "transparent",
+                    color: sourceFilter === "zendesk" ? "var(--text-inverse)" : "var(--text-secondary)",
+                    boxShadow: sourceFilter === "zendesk" ? "var(--shadow-sm)" : "none",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--spacing-xs)",
+                  }}
+                  title="Search Zendesk tickets only"
+                >
+                  <span>🎫</span>
+                  <span>Zendesk</span>
+                </button>
+              </div>
+            )}
+
+            {/* Database Connection Selector - Show when databases are available */}
+            {databaseConnections.length > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "var(--spacing-sm)",
+                  padding: "4px",
+                  background: "var(--gray-100)",
+                  borderRadius: "var(--radius-md)",
+                  width: "fit-content",
+                }}
+              >
+                <label
+                  style={{
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    color: "var(--text-primary)",
+                    whiteSpace: "nowrap",
+                    paddingLeft: "var(--spacing-xs)",
+                  }}
+                >
+                  Database:
+                </label>
+                <select
+                  value={selectedDatabaseId || ""}
+                  onChange={(e) => setSelectedDatabaseId(e.target.value ? parseInt(e.target.value) : null)}
+                  style={{
+                    padding: "var(--spacing-xs) var(--spacing-md)",
+                    fontSize: "0.875rem",
+                    fontWeight: 500,
+                    border: "1px solid var(--gray-300)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--background)",
+                    color: "var(--text-primary)",
+                    cursor: "pointer",
+                    minWidth: "200px",
+                  }}
+                  title="Select database for SQL queries"
+                >
+                  <option value="">Auto-detect</option>
+                  {databaseConnections
+                    .filter((conn) => conn.is_active)
+                    .map((conn) => (
+                      <option key={conn.id} value={conn.id}>
+                        {conn.db_type === "postgresql" ? "🐘" : conn.db_type === "mysql" ? "🐬" : "💾"} {conn.name} ({conn.db_type.toUpperCase()})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
 
             {/* LLM Model Selector - Custom Dropdown */}
             <div 

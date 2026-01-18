@@ -28,6 +28,25 @@ alembic upgrade head
 
 The `init_db()` function in `app/models/base.py` will automatically create all tables defined in models, including the new `user_settings` table.
 
+## Recent Migrations
+
+### Migration: Add vector database configuration to user_settings
+
+**Date**: 2026-01-18  
+**Revision ID**: f5e6d7c8a9b0  
+**Description**: Adds vector database configuration columns (`vector_db_url`, `vector_db_config`, `vector_db_enabled`) to `user_settings` table for user-configurable pgvector databases.
+
+### Migration: Add institutional accounts (organizations)
+
+**Date**: 2026-01-18  
+**Revision ID**: acb0a7ee2ae  
+**Description**: Adds institutional account support with organizations, members, groups, and document sharing. Includes:
+- `organizations` table
+- `organization_members` table (with roles)
+- `organization_groups` table
+- `organization_group_members` table (many-to-many)
+- `organization_id` column added to `knowledge_bases`
+
 ## Migration: Add user_settings table
 
 **Date**: 2026-01-06  

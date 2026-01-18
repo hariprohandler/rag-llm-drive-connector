@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { api } from "../api.js";
 
 const OrganizationContext = createContext({
-  organizationName: "RAG Chat Platform",
+  organizationName: "Anukara",
   setOrganizationName: () => {},
   loading: false,
 });
@@ -10,7 +10,7 @@ const OrganizationContext = createContext({
 export const useOrganization = () => useContext(OrganizationContext);
 
 export const OrganizationProvider = ({ children }) => {
-  const [organizationName, setOrganizationNameState] = useState("RAG Chat Platform");
+  const [organizationName, setOrganizationNameState] = useState("Anukara");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,7 +32,7 @@ export const OrganizationProvider = ({ children }) => {
       .catch(() => {
         // If API fails, use localStorage or default
         if (!stored) {
-          setOrganizationNameState("RAG Chat Platform");
+          setOrganizationNameState("Anukara");
         }
       })
       .finally(() => setLoading(false));

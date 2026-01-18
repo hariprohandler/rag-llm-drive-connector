@@ -30,8 +30,18 @@ class User(Base):
         if decrypt_email_field and self.email:
             # Always attempt to decrypt - decrypt_email handles both encrypted and plain text emails
             # It will return plain text if already decrypted, or decrypt if encrypted
-            from app.services.email_encryption import decrypt_email
-            email_value = decrypt_email(self.email)
+            try:
+                from app.services.email_encryption import decrypt_email
+                email_value = decrypt_email(self.email)
+                
+                # Verify decryption worked - if still encrypted (starts with gAAAAA), log error
+                if email_value and email_value.startswith('gAAAAA'):
+                    print(f"ERROR: Email decryption failed for user {self.id}. Email still appears encrypted.")
+                    print(f"  This usually means the ENCRYPTION_KEY environment variable doesn't match the key used to encrypt.")
+            except Exception as e:
+                print(f"ERROR: Exception during email decryption for user {self.id}: {type(e).__name__}: {e}")
+                # Keep encrypted value if decryption fails
+                email_value = self.email
         
         return {
             "id": self.id,

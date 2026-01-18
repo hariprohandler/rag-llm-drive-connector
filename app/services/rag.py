@@ -2,7 +2,7 @@
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
-from langchain_community.vectorstores.pgvector import PGVector
+from langchain_postgres import PGVector
 # Use LangChain Expression Language (LCEL) for RAG - compatible with LangChain 0.1.0+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -13,15 +13,22 @@ from typing import List, Dict, Any, Optional
 from fastapi import Request, HTTPException
 from sqlalchemy.orm import Session
 from app.core.config import settings
-from app.models import LLMConfig
+from app.models import LLMConfig, UserSettings
 from app.services.activity_logger import get_logger, get_client_ip, get_user_agent
 from app.middleware.tracing import get_tracing_id
+from app.helpers.vector_db_helper import get_collection_name, get_user_vector_db_url
 import time
 
 
-def get_user_collection_name(user_id: str) -> str:
-    """Get collection name for a user."""
-    return f"user_{user_id}_documents"
+def get_user_collection_name(user_id: str, knowledge_base_id: Optional[int] = None) -> str:
+    """
+    Get collection name for a user.
+    
+    For better organization, we organize collections by knowledge base:
+    - If knowledge_base_id is provided: user_{user_id}_kb_{kb_id}
+    - Otherwise: user_{user_id}_documents (searches across all KBs)
+    """
+    return get_collection_name(user_id, knowledge_base_id)
 
 
 def get_llm_from_config(llm_config: LLMConfig) -> BaseChatModel:
@@ -107,30 +114,49 @@ def get_llm_from_config(llm_config: LLMConfig) -> BaseChatModel:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
-def get_vectorstore(collection_name: str, api_key: Optional[str] = None) -> PGVector:
+def get_vectorstore(
+    collection_name: str,
+    api_key: Optional[str] = None,
+    db_url: Optional[str] = None
+) -> PGVector:
     """
     Get or create a PgVector vectorstore.
     
     Args:
         collection_name: Collection name
         api_key: Optional API key for embeddings (defaults to config)
+        db_url: Optional database URL (uses default from settings if not provided)
     """
     embeddings = OpenAIEmbeddings(
         openai_api_key=api_key or settings.openai_api_key
     )
     
+    # Use provided DB URL or default from settings
+    vector_db_url = db_url or settings.database_url
+    
     vectorstore = PGVector(
         collection_name=collection_name,
-        connection_string=settings.database_url,
-        embedding_function=embeddings,
+        connection=vector_db_url,
+        embeddings=embeddings,
+        use_jsonb=True,  # Use JSONB for metadata as recommended
     )
+    
+    # Ensure tables are created with the correct schema (langchain_postgres uses uuid, not id)
+    try:
+        vectorstore.create_tables_if_not_exists()
+    except Exception as e:
+        # Table might already exist, continue anyway
+        pass
+    
     return vectorstore
 
 
 def get_qa_chain(
     collection_name: str,
     llm: BaseChatModel,
-    use_rag: bool = True
+    use_rag: bool = True,
+    source_filter: Optional[str] = None,
+    db_url: Optional[str] = None
 ):
     """
     Create a QA chain for querying documents.
@@ -139,13 +165,33 @@ def get_qa_chain(
         collection_name: Collection name for vectorstore
         llm: LLM instance to use
         use_rag: Whether to use RAG (if False, just uses LLM without retrieval)
+        source_filter: Optional source filter - 'document', 'zendesk', or None for 'all'
+        db_url: Optional database URL (uses default from settings if not provided)
     """
     if use_rag:
         # Return retriever and LLM separately - we'll create the chain when needed
-        vectorstore = get_vectorstore(collection_name)
+        vectorstore = get_vectorstore(collection_name, db_url=db_url)
+        
+        # Build filter based on source_filter
+        # With JSONB metadata, use simple equality for filters (no $eq operator needed)
+        # For "document" filter (not zendesk), we'll filter after retrieval
+        if source_filter == "zendesk":
+            # Increase retrieval for Zendesk to get more context (e.g., for "how many tickets" questions)
+            # This ensures the LLM has access to more relevant Zendesk tickets for comprehensive answers
+            search_kwargs = {
+                "k": settings.retrieval_k * 5,  # Get 5x more documents (20 instead of 4) for better context
+                "filter": {"source": "zendesk"}
+            }
+        elif source_filter == "document":
+            search_kwargs = {"k": settings.retrieval_k * 2}
+        else:
+            # For "all" sources, use default retrieval_k
+            search_kwargs = {"k": settings.retrieval_k}
+        # For "document" filter, we'll handle filtering in ask_question after retrieval
+        
         retriever = vectorstore.as_retriever(
             search_type="similarity",
-            search_kwargs={"k": settings.retrieval_k}
+            search_kwargs=search_kwargs
         )
         return (retriever, llm), True
     else:
@@ -210,7 +256,9 @@ def ask_question(
     db: Session,
     request: Optional[Request] = None,
     llm_config_id: Optional[int] = None,
-    use_rag: bool = True
+    use_rag: bool = True,
+    source_filter: Optional[str] = None,
+    knowledge_base_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Ask a question using the RAG pipeline for a specific user.
@@ -222,12 +270,21 @@ def ask_question(
         request: FastAPI Request object for logging IP and user agent
         llm_config_id: Optional LLM config ID to use
         use_rag: Whether to use RAG (default True)
+        source_filter: Optional source filter - 'document', 'zendesk', or None for 'all'
+        knowledge_base_id: Optional knowledge base ID to search within (searches all KBs if None)
         
     Returns:
         Dictionary with 'answer' and 'sources'
     """
     logger = get_logger()
-    collection_name = get_user_collection_name(user_id)
+    
+    # Get user's vector DB configuration if available
+    user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+    user_vector_db_url = get_user_vector_db_url(user_settings)
+    
+    # Use knowledge_base-specific collection if provided, otherwise search across all KBs
+    collection_name = get_user_collection_name(user_id, knowledge_base_id)
+    
     start_time = time.time()
     
     try:
@@ -274,8 +331,12 @@ def ask_question(
             temp_config.api_key = decrypted_key
             llm = get_llm_from_config(temp_config)
         
-        # Get retriever and LLM
-        retriever_llm, is_rag = get_qa_chain(collection_name, llm, use_rag)
+        # Get retriever and LLM (pass user's vector DB URL)
+        retriever_llm, is_rag = get_qa_chain(
+            collection_name, llm, use_rag, 
+            source_filter=source_filter,
+            db_url=user_vector_db_url
+        )
         
         if is_rag:
             retriever, llm = retriever_llm
@@ -299,6 +360,13 @@ def ask_question(
                             "Retriever does not support invoke(), direct call, or get_relevant_documents(). "
                             "Please check your LangChain version compatibility."
                         )
+            
+            # Apply source filter if needed (for "document" filter - exclude zendesk)
+            if source_filter == "document":
+                source_docs = [
+                    doc for doc in source_docs 
+                    if doc.metadata.get("source") != "zendesk"
+                ][:settings.retrieval_k]  # Limit to retrieval_k after filtering
             
             # Format context from documents
             context = "\n\n".join(doc.page_content for doc in source_docs)
@@ -339,7 +407,8 @@ def ask_question(
                 "num_sources": len(sources),
                 "sources": [src.get("metadata", {}).get("file_name", "unknown") for src in sources] if sources else [],
                 "use_rag": use_rag,
-                "llm_provider": llm_config.provider if llm_config else "default"
+                "llm_provider": llm_config.provider if llm_config else "default",
+                "source_filter": source_filter or "all"
             },
             ip_address=get_client_ip(request) if request else None,
             user_agent=get_user_agent(request) if request else None,
