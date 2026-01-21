@@ -22,9 +22,13 @@ const ChatPage = () => {
   const [loadingConversations, setLoadingConversations] = useState(true);
   const [showHistory, setShowHistory] = useState(true);
   const [showLLMDropdown, setShowLLMDropdown] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [activeUploadTask, setActiveUploadTask] = useState(null);
+  const [taskProgress, setTaskProgress] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const llmDropdownRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   // Load conversations and LLM configs on mount
   useEffect(() => {
@@ -41,6 +45,68 @@ const ChatPage = () => {
       setMessages([]);
     }
   }, [currentConversationId]);
+
+  // Poll upload task progress
+  useEffect(() => {
+    if (activeUploadTask) {
+      const interval = setInterval(async () => {
+        try {
+          const task = await api.getIngestionTaskStatus(activeUploadTask);
+          setTaskProgress(task);
+          
+          if (task.status === "completed" || task.status === "failed") {
+            clearInterval(interval);
+            setActiveUploadTask(null);
+            setUploading(false);
+            
+            // Update existing upload message
+            setMessages((prev) => {
+              const updated = [...prev];
+              const msgIndex = updated.findIndex((m) => m.isUploading || m.taskId === activeUploadTask);
+              if (msgIndex !== -1) {
+                updated[msgIndex] = {
+                  ...updated[msgIndex],
+                  content: task.status === "completed"
+                    ? `✅ Files uploaded successfully! Knowledge base ID: ${task.knowledge_base_id || "N/A"}. You can now ask questions about these documents using RAG Search.`
+                    : `❌ File upload failed: ${task.error || "Unknown error"}`,
+                  isSystem: true,
+                  isUploading: false,
+                };
+              }
+              return updated;
+            });
+            
+            if (task.status === "completed") {
+              // Switch to RAG search mode
+              setQueryType("file");
+            }
+          }
+        } catch (e) {
+          console.error("Error fetching task status:", e);
+        }
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [activeUploadTask]);
+
+  // Update upload message when task progress changes
+  useEffect(() => {
+    if (taskProgress && activeUploadTask) {
+      setMessages((prev) => {
+        const updated = [...prev];
+        const msgIndex = updated.findIndex((m) => m.isUploading || m.taskId === activeUploadTask);
+        if (msgIndex !== -1) {
+          updated[msgIndex] = {
+            ...updated[msgIndex],
+            content: taskProgress.status === "running"
+              ? `📤 Processing files... ${taskProgress.message || ""}`
+              : updated[msgIndex].content,
+          };
+        }
+        return updated;
+      });
+    }
+  }, [taskProgress, activeUploadTask]);
 
   const loadConversations = async () => {
     try {
@@ -331,6 +397,101 @@ const ChatPage = () => {
     }
   };
 
+  const handleFileUpload = async (files) => {
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    setError(null);
+
+    // Add upload started message
+    const uploadMessage = {
+      id: Date.now(),
+      role: "system",
+      content: `📤 Uploading ${files.length} file(s)...`,
+      isSystem: true,
+      isUploading: true,
+    };
+    setMessages((prev) => [...prev, uploadMessage]);
+
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append("files", file));
+
+    try {
+      const res = await fetch(
+        `${import.meta.env.VITE_BACKEND_BASE_URL || "http://localhost:8000"}/api/ingest/upload`,
+        {
+          method: "POST",
+          credentials: "include",
+          body: formData,
+        }
+      );
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(errorText || "Upload failed");
+      }
+
+      const data = await res.json();
+      
+      if (data.task_id) {
+        // Async upload - start polling for progress
+        setActiveUploadTask(data.task_id);
+        // Update upload message
+        setMessages((prev) => {
+          const updated = [...prev];
+          const msgIndex = updated.findIndex((m) => m.id === uploadMessage.id);
+          if (msgIndex !== -1) {
+            updated[msgIndex] = {
+              ...updated[msgIndex],
+              content: `📤 Processing ${files.length} file(s) in background...`,
+              taskId: data.task_id,
+            };
+          }
+          return updated;
+        });
+      } else {
+        // Legacy synchronous response (shouldn't happen with new API)
+        setUploading(false);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const msgIndex = updated.findIndex((m) => m.id === uploadMessage.id);
+          if (msgIndex !== -1) {
+            updated[msgIndex] = {
+              ...updated[msgIndex],
+              content: `✅ Successfully uploaded ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id || "N/A"}. You can now ask questions about these documents using RAG Search.`,
+              isUploading: false,
+            };
+          }
+          return updated;
+        });
+        setQueryType("file");
+      }
+    } catch (e) {
+      setUploading(false);
+      setError(`File upload error: ${e.message}`);
+      setMessages((prev) => {
+        const updated = [...prev];
+        const msgIndex = updated.findIndex((m) => m.id === uploadMessage.id);
+        if (msgIndex !== -1) {
+          updated[msgIndex] = {
+            ...updated[msgIndex],
+            content: `❌ File upload failed: ${e.message}`,
+            isUploading: false,
+          };
+        }
+        return updated;
+      });
+    }
+  };
+
+  const handleFileInput = (e) => {
+    handleFileUpload(e.target.files);
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const getLLMDisplayName = (llmId) => {
     if (!llmId) return "Default (System)";
     const config = llmConfigs.find(c => c.id === llmId);
@@ -557,13 +718,25 @@ const ChatPage = () => {
                     alignItems: "flex-start",
                     padding: "var(--spacing-md)",
                     borderRadius: "var(--radius-md)",
-                    background: m.role === "user" ? "var(--primary)" : "var(--gray-100)",
-                    color: m.role === "user" ? "var(--text-inverse)" : "var(--text-primary)",
+                    background: m.isSystem 
+                      ? "var(--primary-light)" 
+                      : m.role === "user" 
+                        ? "var(--primary)" 
+                        : "var(--gray-100)",
+                    color: m.isSystem 
+                      ? "var(--text-primary)" 
+                      : m.role === "user" 
+                        ? "var(--text-inverse)" 
+                        : "var(--text-primary)",
                     alignSelf: m.role === "user" ? "flex-end" : "flex-start",
                     maxWidth: "80%",
                     marginLeft: m.role === "user" ? "auto" : 0,
                     marginRight: m.role === "user" ? 0 : "auto",
-                    border: m.isError ? "1px solid var(--error)" : "none",
+                    border: m.isError 
+                      ? "1px solid var(--error)" 
+                      : m.isSystem 
+                        ? "1px solid var(--primary)" 
+                        : "none",
                     animationDelay: `${i * 0.1}s`,
                     transition: "transform var(--transition-base)",
                   }}
@@ -577,11 +750,11 @@ const ChatPage = () => {
                   }}
                 >
                   <div style={{ minWidth: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {m.role === "user" ? "👤" : "🤖"}
+                    {m.isSystem ? "🔔" : m.role === "user" ? "👤" : "🤖"}
                   </div>
                   <div style={{ flex: 1, wordBreak: "break-word" }}>
                     <div style={{ fontWeight: 600, marginBottom: "var(--spacing-xs)", fontSize: "0.875rem" }}>
-                      {m.role === "user" ? "You" : "Assistant"}
+                      {m.isSystem ? "System" : m.role === "user" ? "You" : "Assistant"}
                     </div>
                     <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
                       {m.content}
@@ -600,6 +773,21 @@ const ChatPage = () => {
                         </span>
                       )}
                     </div>
+                    {m.isSystem && (
+                      <div
+                        style={{
+                          marginTop: "var(--spacing-xs)",
+                          fontSize: "0.75rem",
+                          opacity: 0.7,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "var(--spacing-xs)",
+                        }}
+                      >
+                        <span>🔔</span>
+                        <span>System Message</span>
+                      </div>
+                    )}
                     {m.queryType && (
                       <div
                         style={{
@@ -613,6 +801,40 @@ const ChatPage = () => {
                       >
                         <span>{m.queryType === "ask" ? "💬" : "📄"}</span>
                         <span>{m.queryType === "ask" ? "Direct LLM Query" : "RAG Query"}</span>
+                      </div>
+                    )}
+                    {m.isUploading && taskProgress && (
+                      <div
+                        style={{
+                          marginTop: "var(--spacing-sm)",
+                          paddingTop: "var(--spacing-sm)",
+                          borderTop: "1px solid rgba(0, 0, 0, 0.1)",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "var(--spacing-xs)" }}>
+                          <span style={{ fontSize: "0.75rem" }}>{taskProgress.message || "Processing..."}</span>
+                          <span style={{ fontSize: "0.75rem", fontWeight: 600 }}>
+                            {taskProgress.progress?.toFixed(1) || 0}%
+                          </span>
+                        </div>
+                        <div
+                          style={{
+                            width: "100%",
+                            height: "8px",
+                            background: "rgba(0, 0, 0, 0.1)",
+                            borderRadius: "var(--radius-full)",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${taskProgress.progress || 0}%`,
+                              height: "100%",
+                              background: taskProgress.status === "failed" ? "var(--error)" : "var(--primary)",
+                              transition: "width 0.3s ease",
+                            }}
+                          />
+                        </div>
                       </div>
                     )}
                     {m.sources && m.sources.length > 0 && (
@@ -1205,7 +1427,7 @@ const ChatPage = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={queryType === "ask" ? "Ask a general question..." : "Ask a question about your documents..."}
-              disabled={loading}
+              disabled={loading || uploading}
               rows={1}
               style={{
                 flex: 1,
@@ -1225,9 +1447,37 @@ const ChatPage = () => {
                 e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
               }}
             />
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: uploading || loading ? "not-allowed" : "pointer",
+                padding: "var(--spacing-md)",
+                minWidth: "44px",
+                height: "44px",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--gray-300)",
+                background: uploading || loading ? "var(--gray-100)" : "var(--bg-primary)",
+                transition: "all var(--transition-base)",
+                opacity: uploading || loading ? 0.6 : 1,
+              }}
+              title="Upload files"
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                onChange={handleFileInput}
+                disabled={uploading || loading}
+                style={{ display: "none" }}
+                accept=".pdf,.docx,.doc,.txt,.md,.csv"
+              />
+              <span style={{ fontSize: "1.25rem" }}>📎</span>
+            </label>
             <button
               onClick={sendMessage}
-              disabled={loading || !input.trim()}
+              disabled={loading || !input.trim() || uploading}
               className="btn btn-primary hover-lift"
               style={{
                 padding: "var(--spacing-md) var(--spacing-xl)",

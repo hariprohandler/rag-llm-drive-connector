@@ -12,6 +12,8 @@ class ConnectorType(str, enum.Enum):
     ONEDRIVE = "onedrive"
     SLACK = "slack"
     TEAMS = "teams"
+    GMAIL = "gmail"
+    OUTLOOK = "outlook"
 
 
 class ConnectorStatus(str, enum.Enum):

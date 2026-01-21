@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from app.models import User, ToolConfig, SyncJob
-from app.models.connector import SyncJobStatus
+from app.models.connector import SyncJobStatus, Connector, ConnectorStatus
 from app.models.base import get_db
 from app.services.auth_service import get_current_user
 from app.services.sync_worker import create_zendesk_sync_job, get_sync_worker
@@ -72,25 +72,35 @@ async def list_tools(
             "name": "Slack",
             "description": "Sync messages and conversations from Slack",
             "icon": "💬",
-            "enabled": False,
+            "enabled": True,
+            "config_fields": [
+                {"name": "access_token", "label": "Slack Access Token", "type": "password", "required": True, "help": "Slack Bot User OAuth Token (xoxb-...)"},
+                {"name": "channel_ids", "label": "Channel IDs (optional)", "type": "text", "required": False, "help": "Comma-separated list of channel IDs to sync (leave empty for all channels)"}
+            ]
         },
         "teams": {
             "name": "Microsoft Teams",
             "description": "Sync messages and conversations from Teams",
             "icon": "👥",
-            "enabled": False,
+            "enabled": True,
+            "requires_oauth": True,
+            "provider": "microsoft"
         },
         "outlook": {
             "name": "Outlook",
             "description": "Sync emails from Outlook",
             "icon": "📧",
-            "enabled": False,
+            "enabled": True,
+            "requires_oauth": True,
+            "provider": "microsoft"
         },
         "gmail": {
             "name": "Gmail",
             "description": "Sync emails from Gmail",
             "icon": "📨",
-            "enabled": False,
+            "enabled": True,
+            "requires_oauth": True,
+            "provider": "google"
         },
         }
         
@@ -169,8 +179,9 @@ async def create_tool_config(
     
     try:
         # Validate tool name
-        if request.tool_name not in ["zendesk"]:
-            raise HTTPException(status_code=400, detail=f"Tool '{request.tool_name}' is not available yet")
+        available_tools = ["zendesk", "gmail", "outlook", "teams", "slack"]
+        if request.tool_name not in available_tools:
+            raise HTTPException(status_code=400, detail=f"Tool '{request.tool_name}' is not available")
         
         # Check if config already exists
         existing = db.query(ToolConfig).filter(
@@ -369,11 +380,65 @@ async def sync_tool(
             )
         
         # Validate tool name
-        if request.tool_name != "zendesk":
+        available_tools = ["zendesk", "gmail", "outlook", "teams", "slack"]
+        if request.tool_name not in available_tools:
             raise HTTPException(
                 status_code=400,
-                detail=f"Tool '{request.tool_name}' sync is not yet implemented"
+                detail=f"Tool '{request.tool_name}' sync is not available"
             )
+        
+        # For connectors (Gmail, Outlook, Teams, Slack), use connector sync
+        if request.tool_name in ["gmail", "outlook", "teams", "slack"]:
+            from app.models.connector import ConnectorType
+            from app.services.sync_worker import create_connector_sync_job
+            
+            # Map tool name to connector type
+            type_map = {
+                "gmail": ConnectorType.GMAIL,
+                "outlook": ConnectorType.OUTLOOK,
+                "teams": ConnectorType.TEAMS,
+                "slack": ConnectorType.SLACK
+            }
+            
+            connector_type = type_map[request.tool_name]
+            
+            # Find or create connector
+            connector = db.query(Connector).filter(
+                Connector.user_id == current_user.id,
+                Connector.connector_type == connector_type,
+                Connector.is_active == True
+            ).first()
+            
+            if not connector:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{request.tool_name.title()} connector not found. Please connect your {request.tool_name} account first."
+                )
+            
+            if connector.status != ConnectorStatus.CONNECTED:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{request.tool_name.title()} connector is not connected. Please connect your account first."
+                )
+            
+            # Create connector sync job
+            sync_job = create_connector_sync_job(
+                db=db,
+                connector_id=connector.id,
+                user_id=current_user.id,
+                organization_id=connector.organization_id,
+                knowledge_base_id=None,
+                sync_scope=request.sync_scope,
+                priority=request.priority
+            )
+            
+            activity_logger.log_success({"job_id": sync_job.id})
+            return {
+                "status": "queued",
+                "job_id": sync_job.id,
+                "message": f"Sync queued for {request.tool_name}",
+                "job": sync_job.to_dict()
+            }
         
         # Check for active sync jobs
         active_jobs = db.query(SyncJob).filter(
