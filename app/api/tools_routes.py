@@ -1,14 +1,15 @@
 """API routes for third-party tool integrations."""
 from typing import Optional, List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-import threading
+from sqlalchemy import desc
 
-from app.models import User, ToolConfig
+from app.models import User, ToolConfig, SyncJob
+from app.models.connector import SyncJobStatus
 from app.models.base import get_db
 from app.services.auth_service import get_current_user
-from app.services.tool_sync_task import create_tool_sync_task, get_tool_sync_task, run_tool_sync_task
+from app.services.sync_worker import create_zendesk_sync_job, get_sync_worker
 from app.services.llm_service import encrypt_api_key
 from app.helpers.logging_helper import ActivityLogger
 
@@ -29,6 +30,8 @@ class ToolConfigUpdateRequest(BaseModel):
 
 class SyncRequest(BaseModel):
     tool_name: str
+    sync_scope: Optional[dict] = None  # e.g., {"max_tickets": 100, "date_range": {...}}
+    priority: int = 5  # 1-10, lower = higher priority
 
 
 @router.get("")
@@ -337,12 +340,11 @@ async def delete_tool_config(
 @router.post("/sync")
 async def sync_tool(
     request: SyncRequest,
-    background_tasks: BackgroundTasks,
     fastapi_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Start a background sync for a tool."""
+    """Start a background sync for a tool using persistent SyncJob."""
     activity_logger = ActivityLogger(
         request=fastapi_request,
         activity_type="tool_sync_start",
@@ -366,24 +368,46 @@ async def sync_tool(
                 detail=f"Tool '{request.tool_name}' is not configured or not active"
             )
         
-        # Create sync task
-        task = create_tool_sync_task(
+        # Validate tool name
+        if request.tool_name != "zendesk":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Tool '{request.tool_name}' sync is not yet implemented"
+            )
+        
+        # Check for active sync jobs
+        active_jobs = db.query(SyncJob).filter(
+            SyncJob.user_id == current_user.id,
+            SyncJob.source_type == request.tool_name,
+            SyncJob.status.in_([SyncJobStatus.PENDING, SyncJobStatus.QUEUED, SyncJobStatus.PROCESSING, SyncJobStatus.INDEXING])
+        ).count()
+        
+        if active_jobs > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"A sync is already in progress for {request.tool_name}. Please wait for it to complete."
+            )
+        
+        # Create sync job
+        sync_job = create_zendesk_sync_job(
+            db=db,
             user_id=current_user.id,
-            tool_name=request.tool_name
+            organization_id=None,  # Can be added later for org support
+            connector_id=None,  # Can be added later
+            knowledge_base_id=None,  # Will be created automatically
+            sync_scope=request.sync_scope,
+            priority=request.priority
         )
         
-        # Run in background
-        def run_task():
-            run_tool_sync_task(task)
+        # Ensure worker is running
+        get_sync_worker()
         
-        thread = threading.Thread(target=run_task, daemon=True)
-        thread.start()
-        
-        activity_logger.log_success({"task_id": task.task_id})
+        activity_logger.log_success({"job_id": sync_job.id})
         return {
-            "status": "started",
-            "task_id": task.task_id,
-            "message": f"Sync started for {request.tool_name}"
+            "status": "queued",
+            "job_id": sync_job.id,
+            "message": f"Sync queued for {request.tool_name}",
+            "job": sync_job.to_dict()
         }
         
     except HTTPException:
@@ -393,36 +417,81 @@ async def sync_tool(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/sync/{task_id}")
-async def get_sync_status(
-    task_id: str,
+@router.get("/sync/jobs")
+async def list_sync_jobs(
     fastapi_request: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 20,
+    status: Optional[str] = None,
 ):
-    """Get the status of a sync task."""
+    """List sync jobs for the current user."""
     activity_logger = ActivityLogger(
         request=fastapi_request,
-        activity_type="tool_sync_status",
-        endpoint=f"/api/tools/sync/{task_id}",
+        activity_type="tool_sync_list",
+        endpoint="/api/tools/sync/jobs",
         method="GET",
         user_id=current_user.id,
-        metadata={"task_id": task_id}
+        metadata={}
     )
     
     try:
-        task = get_tool_sync_task(task_id)
+        query = db.query(SyncJob).filter(
+            SyncJob.user_id == current_user.id
+        )
         
-        if not task:
-            activity_logger.log_error("Task not found", status_code=404)
-            raise HTTPException(status_code=404, detail="Task not found")
+        if status:
+            try:
+                status_enum = SyncJobStatus(status)
+                query = query.filter(SyncJob.status == status_enum)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
         
-        # Verify task belongs to user
-        if task.user_id != current_user.id:
+        jobs = query.order_by(desc(SyncJob.created_at)).limit(limit).all()
+        
+        activity_logger.log_success({"jobs_count": len(jobs)})
+        return {
+            "jobs": [job.to_dict() for job in jobs],
+            "total": len(jobs)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        activity_logger.log_error(str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sync/jobs/{job_id}")
+async def get_sync_job_status(
+    job_id: int,
+    fastapi_request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the status of a specific sync job."""
+    activity_logger = ActivityLogger(
+        request=fastapi_request,
+        activity_type="tool_sync_status",
+        endpoint=f"/api/tools/sync/jobs/{job_id}",
+        method="GET",
+        user_id=current_user.id,
+        metadata={"job_id": job_id}
+    )
+    
+    try:
+        job = db.query(SyncJob).filter(SyncJob.id == job_id).first()
+        
+        if not job:
+            activity_logger.log_error("Job not found", status_code=404)
+            raise HTTPException(status_code=404, detail="Sync job not found")
+        
+        # Verify job belongs to user
+        if job.user_id != current_user.id:
             activity_logger.log_error("Access denied", status_code=403)
             raise HTTPException(status_code=403, detail="Access denied")
         
-        activity_logger.log_success({"task_id": task_id, "status": task.status})
-        return task.to_dict()
+        activity_logger.log_success({"job_id": job_id, "status": job.status.value})
+        return job.to_dict()
     except HTTPException:
         raise
     except Exception as e:

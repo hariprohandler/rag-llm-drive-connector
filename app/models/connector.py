@@ -102,7 +102,7 @@ class SyncJob(Base):
     __tablename__ = "sync_jobs"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    connector_id = Column(Integer, ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False, index=True)
+    connector_id = Column(Integer, ForeignKey("connectors.id", ondelete="CASCADE"), nullable=True, index=True)  # Nullable for tools like Zendesk that use ToolConfig
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     organization_id = Column(Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True)
     

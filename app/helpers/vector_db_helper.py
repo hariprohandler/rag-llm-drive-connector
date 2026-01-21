@@ -152,13 +152,20 @@ def get_user_vector_db_url(user_settings) -> Optional[str]:
     """
     Get the vector database URL for a user, either from their settings or default.
     
+    For backward compatibility: If a user has a vector_db_url configured but 
+    vector_db_enabled is False (e.g., after migration), we still use it.
+    The vector_db_enabled flag is primarily for explicit user control via UI.
+    
     Args:
         user_settings: UserSettings model instance or None
         
     Returns:
-        Vector database URL string or None
+        Vector database URL string or None (None means use default database)
     """
-    if user_settings and user_settings.vector_db_enabled and user_settings.vector_db_url:
+    if user_settings and user_settings.vector_db_url:
+        # Use the URL if it exists, regardless of enabled flag
+        # This preserves existing configurations after migration
+        # The enabled flag is for UI control, but if URL exists, use it
         return user_settings.vector_db_url
     return None
 

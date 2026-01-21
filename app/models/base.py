@@ -16,12 +16,14 @@ def normalize_db_url(url: str) -> str:
     return url
 
 # Master database engine (for writes)
+# Use echo=False for production, but can enable for debugging
 master_engine = create_engine(
     normalize_db_url(settings.database_url),
-    pool_pre_ping=True,
-    pool_recycle=3600,
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=3600,  # Recycle connections after 1 hour
     pool_size=10,
-    max_overflow=20
+    max_overflow=20,
+    echo=False  # Set to True for SQL query debugging
 )
 
 # Slave database engine (for reads) - falls back to master if not configured

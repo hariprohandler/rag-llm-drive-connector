@@ -15,6 +15,29 @@ services:
     deploy:
       replicas: 0
 
+  # RabbitMQ should still run in Docker for local development
+  rabbitmq:
+    # Use same configuration as base docker-compose.yml
+    # RabbitMQ runs in Docker even for local development
+    image: rabbitmq:3-management-alpine
+    container_name: rag-rabbitmq-local
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"      # AMQP port
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-rabbitmq}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-rabbitmq}
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_VHOST:-/}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rag-network
+
   app:
     # Run uvicorn directly for better reload support
     # Use main.py as entry point to avoid namespace conflict (app.py vs app/ directory)
@@ -37,12 +60,17 @@ services:
       # On Linux, you may need to use network_mode: host instead
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-postgres}
       - MONGODB_URL=mongodb://host.docker.internal:${MONGODB_PORT:-27017}
+      # RabbitMQ runs in Docker, so use container name
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-rabbitmq}:${RABBITMQ_PASSWORD:-rabbitmq}@rabbitmq:5672/${RABBITMQ_VHOST:-/}
       # Enable auto-reload for backend code changes
       - ENVIRONMENT=development
       - UVICORN_RELOAD=true
       # All other environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, etc.)
       # are loaded from .env.development via env_file above
     # Note: depends_on from base file remains, but postgres/mongodb won't start due to replicas: 0
+    # RabbitMQ should still be available via depends_on
+    depends_on:
+      - rabbitmq
     # For Linux, uncomment the line below if host.docker.internal doesn't work:
     # network_mode: host
     # And change DATABASE_URL/MONGODB_URL to use localhost instead of host.docker.internal

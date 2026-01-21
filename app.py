@@ -12,6 +12,10 @@ from app.models.base import init_db
 
 init_db()
 
+# Start background sync worker
+from app.services.sync_worker import get_sync_worker
+get_sync_worker()  # This will start the worker thread
+
 app = FastAPI(title="RAG LLM Drive Connector", version="1.0.0")
 
 # Tracing middleware (must be added before CORS)

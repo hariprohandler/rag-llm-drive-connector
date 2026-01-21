@@ -35,6 +35,26 @@ services:
     networks:
       - rag-network
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rag-rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"      # AMQP port
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"  # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-rabbitmq}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-rabbitmq}
+      - RABBITMQ_DEFAULT_VHOST=${RABBITMQ_VHOST:-/}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - rag-network
+
   app:
     build:
       context: .
@@ -46,6 +66,7 @@ services:
       - DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-postgres}
       - MONGODB_URL=mongodb://mongodb:27017
       - MONGODB_DATABASE=${MONGODB_DATABASE:-rag_activity_logs}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-rabbitmq}:${RABBITMQ_PASSWORD:-rabbitmq}@rabbitmq:5672/${RABBITMQ_VHOST:-/}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
@@ -60,6 +81,8 @@ services:
       postgres:
         condition: service_healthy
       mongodb:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     volumes:
       - ./data:/app/data:ro
@@ -84,6 +107,7 @@ services:
 volumes:
   postgres_data:
   mongodb_data:
+  rabbitmq_data:
 
 networks:
   rag-network:

@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     mongodb_url: str = "mongodb://localhost:27017"
     mongodb_database: str = "rag_activity_logs"
     
+    # RabbitMQ for job queue
+    rabbitmq_url: str = "amqp://rabbitmq:rabbitmq@localhost:5672/"
+    rabbitmq_queue_name: str = "sync_jobs"
+    rabbitmq_exchange: str = "sync_exchange"
+    
     # OpenAI (default fallback)
     openai_api_key: Optional[str] = None
     
