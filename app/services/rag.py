@@ -279,7 +279,8 @@ def ask_question(
     logger = get_logger()
     
     # Get user's vector DB configuration if available
-    user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+    from app.models.user_settings import safe_query_user_settings
+    user_settings = safe_query_user_settings(db, user_id)
     user_vector_db_url = get_user_vector_db_url(user_settings)
     
     # Use knowledge_base-specific collection if provided, otherwise search across all KBs

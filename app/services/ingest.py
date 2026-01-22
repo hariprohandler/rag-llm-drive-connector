@@ -10,6 +10,8 @@ from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import KnowledgeBase, UserSettings
+from app.models.knowledge_base import safe_query_knowledge_bases
+from app.models.user_settings import safe_query_user_settings
 from app.helpers.vector_db_helper import get_collection_name, get_user_vector_db_url, get_vector_table_name
 from app.constants import DefaultValues, SourceType
 import os
@@ -207,11 +209,20 @@ def ingest_local_files(
     # Check for duplicate files by comparing file name and size
     existing_kbs = []
     if db:
-        existing_kbs = db.query(KnowledgeBase).filter(
-            KnowledgeBase.user_id == user_id,
-            KnowledgeBase.source_type == "local_file",
-            KnowledgeBase.is_active == True
-        ).all()
+        try:
+            existing_kbs = safe_query_knowledge_bases(
+                db,
+                {
+                    "user_id": user_id,
+                    "source_type": "local_file",
+                    "is_active": True
+                }
+            )
+        except Exception as e:
+            # If query fails, log and continue without duplicate detection
+            print(f"Warning: Could not query existing knowledge bases for duplicate detection: {e}")
+            db.rollback()
+            existing_kbs = []
     
     # Build a set of existing files (name + size) for duplicate detection
     existing_files = set()
@@ -304,7 +315,12 @@ def ingest_local_files(
     # Get user's vector DB configuration if available
     user_vector_db_url = None
     if db:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        try:
+            user_settings = safe_query_user_settings(db, user_id)
+        except Exception as e:
+            print(f"Warning: Could not query user settings: {e}")
+            db.rollback()
+            user_settings = None
         user_vector_db_url = get_user_vector_db_url(user_settings)
     
     # Create knowledge base entry first if db provided (to get kb_id for collection naming)
@@ -399,7 +415,12 @@ def ingest_google_drive(
         # Get user's vector DB configuration if available
         user_vector_db_url = None
         if db:
-            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            try:
+                user_settings = safe_query_user_settings(db, user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
         
         # Create knowledge base entry first (to get kb_id for collection naming)
@@ -486,7 +507,12 @@ def ingest_onedrive(
         # Get user's vector DB configuration if available
         user_vector_db_url = None
         if db:
-            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            try:
+                user_settings = safe_query_user_settings(db, user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
         
         # Create knowledge base entry first (to get kb_id for collection naming)

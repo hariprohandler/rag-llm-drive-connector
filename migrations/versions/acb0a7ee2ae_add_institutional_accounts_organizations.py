@@ -97,13 +97,25 @@ def upgrade() -> None:
     op.create_index(op.f('ix_organization_group_members_member_id'), 'organization_group_members', ['member_id'], unique=False)
     op.create_index('ix_group_member_ids', 'organization_group_members', ['group_id', 'member_id'], unique=False)
     
-    # Add organization_id to knowledge_bases table
-    op.add_column('knowledge_bases', sa.Column('organization_id', sa.Integer(), nullable=True))
-    op.create_foreign_key('fk_kb_organization', 'knowledge_bases', 'organizations', ['organization_id'], ['id'], ondelete='CASCADE')
-    op.create_index(op.f('ix_knowledge_bases_organization_id'), 'knowledge_bases', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_source_type'), 'knowledge_bases', ['source_type'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_is_active'), 'knowledge_bases', ['is_active'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_created_at'), 'knowledge_bases', ['created_at'], unique=False)
+    # Add organization_id to knowledge_bases table (backward compatible - check if column exists first)
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('knowledge_bases')]
+    
+    if 'organization_id' not in columns:
+        op.add_column('knowledge_bases', sa.Column('organization_id', sa.Integer(), nullable=True))
+        op.create_foreign_key('fk_kb_organization', 'knowledge_bases', 'organizations', ['organization_id'], ['id'], ondelete='CASCADE')
+        op.create_index(op.f('ix_knowledge_bases_organization_id'), 'knowledge_bases', ['organization_id'], unique=False)
+    
+    # Create other indexes if they don't exist (idempotent)
+    indexes = [idx['name'] for idx in inspector.get_indexes('knowledge_bases')]
+    if 'ix_knowledge_bases_source_type' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_source_type'), 'knowledge_bases', ['source_type'], unique=False)
+    if 'ix_knowledge_bases_is_active' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_is_active'), 'knowledge_bases', ['is_active'], unique=False)
+    if 'ix_knowledge_bases_created_at' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_created_at'), 'knowledge_bases', ['created_at'], unique=False)
 
 
 def downgrade() -> None:

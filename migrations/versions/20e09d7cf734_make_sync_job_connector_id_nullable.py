@@ -19,9 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Make connector_id nullable in sync_jobs table for tools like Zendesk."""
-    op.alter_column('sync_jobs', 'connector_id',
-                    existing_type=sa.Integer(),
-                    nullable=True)
+    # Check if sync_jobs table exists before trying to alter it
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    if 'sync_jobs' in inspector.get_table_names():
+        op.alter_column('sync_jobs', 'connector_id',
+                        existing_type=sa.Integer(),
+                        nullable=True)
 
 
 def downgrade() -> None:

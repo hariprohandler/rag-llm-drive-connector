@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.models import User, KnowledgeBase
 from app.models.base import get_db
+from app.models.knowledge_base import safe_query_knowledge_bases
 from app.services.auth_service import get_current_user
 from app.helpers.logging_helper import ActivityLogger
 
@@ -16,14 +17,25 @@ async def list_knowledge_bases(
     db: Session = Depends(get_db),
 ):
     """Get all knowledge bases for the current user."""
-    kbs = (
-        db.query(KnowledgeBase)
-        .filter(
-            KnowledgeBase.user_id == current_user.id,
-            KnowledgeBase.is_active == True,  # noqa: E712
+    try:
+        kbs = safe_query_knowledge_bases(
+            db,
+            {
+                "user_id": current_user.id,
+                "is_active": True
+            }
         )
-        .all()
-    )
+    except Exception as e:
+        # Fallback to direct query if safe_query fails
+        db.rollback()
+        kbs = (
+            db.query(KnowledgeBase)
+            .filter(
+                KnowledgeBase.user_id == current_user.id,
+                KnowledgeBase.is_active == True,  # noqa: E712
+            )
+            .all()
+        )
     return [kb.to_dict() for kb in kbs]
 
 
@@ -97,15 +109,27 @@ async def list_local_files(
     from pathlib import Path
     
     # Get all local file knowledge bases
-    kbs = (
-        db.query(KnowledgeBase)
-        .filter(
-            KnowledgeBase.user_id == current_user.id,
-            KnowledgeBase.source_type == "local_file",
-            KnowledgeBase.is_active == True,  # noqa: E712
+    try:
+        kbs = safe_query_knowledge_bases(
+            db,
+            {
+                "user_id": current_user.id,
+                "source_type": "local_file",
+                "is_active": True
+            }
         )
-        .all()
-    )
+    except Exception as e:
+        # Fallback to direct query if safe_query fails
+        db.rollback()
+        kbs = (
+            db.query(KnowledgeBase)
+            .filter(
+                KnowledgeBase.user_id == current_user.id,
+                KnowledgeBase.source_type == "local_file",
+                KnowledgeBase.is_active == True,  # noqa: E712
+            )
+            .all()
+        )
     
     # Build file tree structure
     file_tree: Dict[str, Dict] = {}

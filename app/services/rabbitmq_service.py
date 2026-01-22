@@ -3,8 +3,9 @@ import json
 import logging
 import pika
 from typing import Optional, Dict, Any, Callable
-from pika.connection import URLParameters
+from pika.connection import URLParameters, ConnectionParameters
 from pika.exceptions import AMQPConnectionError, AMQPChannelError
+from urllib.parse import urlparse, unquote
 
 from app.core.config import settings
 
@@ -25,8 +26,38 @@ class RabbitMQService:
             return True
         
         try:
-            # Parse connection URL
-            params = URLParameters(settings.rabbitmq_url)
+            # Parse connection URL and extract components
+            rabbitmq_url = settings.rabbitmq_url.strip()
+            
+            # Parse the URL to extract components
+            parsed = urlparse(rabbitmq_url)
+            
+            # Extract username and password
+            username = parsed.username or 'guest'
+            password = parsed.password or 'guest'
+            
+            # Extract host and port
+            host = parsed.hostname or 'localhost'
+            port = parsed.port or 5672
+            
+            # Extract vhost from path
+            # For default vhost '/', the path will be '/', '/%2F', or empty
+            vhost_path = parsed.path or '/'
+            # Decode URL-encoded vhost
+            vhost = unquote(vhost_path)
+            # Remove leading slash if present
+            vhost = vhost.lstrip('/')
+            # If empty after decoding, use default '/'
+            if not vhost:
+                vhost = '/'
+            
+            # Use ConnectionParameters directly for more control
+            params = ConnectionParameters(
+                host=host,
+                port=port,
+                virtual_host=vhost,
+                credentials=pika.PlainCredentials(username, password)
+            )
             
             # Create connection
             self._connection = pika.BlockingConnection(params)

@@ -197,9 +197,13 @@ class SyncWorker:
             
             # Get user's vector DB configuration
             from app.models import UserSettings
-            user_settings = db.query(UserSettings).filter(
-                UserSettings.user_id == job.user_id
-            ).first()
+            from app.models.user_settings import safe_query_user_settings
+            try:
+                user_settings = safe_query_user_settings(db, job.user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
             
             # Create or get knowledge base
@@ -395,9 +399,13 @@ class SyncWorker:
             
             # Get user's vector DB configuration
             from app.models import UserSettings
-            user_settings = db.query(UserSettings).filter(
-                UserSettings.user_id == job.user_id
-            ).first()
+            from app.models.user_settings import safe_query_user_settings
+            try:
+                user_settings = safe_query_user_settings(db, job.user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
             
             # Create or get knowledge base
