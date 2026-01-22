@@ -15,8 +15,9 @@ router = APIRouter(prefix="/api/knowledge-bases", tags=["knowledge-bases"])
 async def list_knowledge_bases(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    include_sync_history: bool = False,
 ):
-    """Get all knowledge bases for the current user."""
+    """Get all knowledge bases for the current user with optional sync history."""
     try:
         kbs = safe_query_knowledge_bases(
             db,
@@ -34,9 +35,43 @@ async def list_knowledge_bases(
                 KnowledgeBase.user_id == current_user.id,
                 KnowledgeBase.is_active == True,  # noqa: E712
             )
+            .order_by(KnowledgeBase.created_at.desc())
             .all()
         )
-    return [kb.to_dict() for kb in kbs]
+    
+    result = []
+    for kb in kbs:
+        kb_dict = kb.to_dict()
+        
+        # Add sync history if requested
+        if include_sync_history:
+            from app.models.connector import SyncJob, SyncJobStatus
+            from sqlalchemy import desc
+            
+            # Get related sync jobs
+            sync_jobs = (
+                db.query(SyncJob)
+                .filter(
+                    SyncJob.knowledge_base_id == kb.id,
+                    SyncJob.user_id == current_user.id
+                )
+                .order_by(desc(SyncJob.created_at))
+                .limit(10)
+                .all()
+            )
+            
+            kb_dict["sync_history"] = [job.to_dict() for job in sync_jobs]
+            
+            # Get latest sync status
+            latest_sync = sync_jobs[0] if sync_jobs else None
+            if latest_sync:
+                kb_dict["last_sync_status"] = latest_sync.status.value
+                kb_dict["last_sync_at"] = latest_sync.completed_at.isoformat() if latest_sync.completed_at else None
+                kb_dict["last_sync_error"] = latest_sync.error_message
+        
+        result.append(kb_dict)
+    
+    return result
 
 
 @router.get("/{kb_id}")

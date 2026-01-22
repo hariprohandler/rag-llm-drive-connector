@@ -8,6 +8,9 @@ from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
+from datetime import datetime
+import json
 from app.core.config import settings
 from app.models import KnowledgeBase, UserSettings
 from app.models.knowledge_base import safe_query_knowledge_bases
@@ -337,11 +340,15 @@ def ingest_local_files(
             # Sanitize file paths - remove NUL characters and other problematic characters
             sanitized_paths = [path.replace('\x00', '') for path in file_paths]
             # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
-            kb = KnowledgeBase(
+            # Use safe helper function to create KB
+            from app.helpers.kb_helper import create_knowledge_base_safe
+            
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="local_file",
-                source_id="local_files",  # Use a simple identifier instead of file paths
+                source_id="local_files",
                 extra_metadata={
                     "files": file_metadata, 
                     "file_paths": sanitized_paths,
@@ -349,13 +356,10 @@ def ingest_local_files(
                     "duplicate_files": duplicate_files,
                 },
                 document_count=len(all_documents),
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()  # Flush to get the ID without committing
             kb_id = kb.id
-            db.commit()  # Now commit
-            db.refresh(kb)  # Refresh to ensure we have the latest state
             print(f"Successfully created knowledge base with ID: {kb_id} for user: {user_id}, name: {kb_name}")
         except Exception as e:
             print(f"ERROR creating knowledge base entry: {e}")
@@ -426,21 +430,20 @@ def ingest_google_drive(
         # Create knowledge base entry first (to get kb_id for collection naming)
         kb_id = knowledge_base_id
         if db and not kb_id:
+            from app.helpers.kb_helper import create_knowledge_base_safe
             kb_name = knowledge_base_name or f"Google Drive Folder ({folder_id})"
-            kb = KnowledgeBase(
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="google_drive",
                 source_id=folder_id,
                 extra_metadata={"folder_id": folder_id},
                 document_count=0,  # Will update after ingestion
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()
             kb_id = kb.id
-            db.commit()
-            db.refresh(kb)
         
         loader = GoogleDriveLoader(
             folder_id=folder_id,
@@ -518,21 +521,20 @@ def ingest_onedrive(
         # Create knowledge base entry first (to get kb_id for collection naming)
         kb_id = knowledge_base_id
         if db and not kb_id:
+            from app.helpers.kb_helper import create_knowledge_base_safe
             kb_name = knowledge_base_name or f"OneDrive Folder ({folder_path})"
-            kb = KnowledgeBase(
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="onedrive",
                 source_id=folder_path,
                 extra_metadata={"folder_path": folder_path},
                 document_count=0,  # Will update after ingestion
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()
             kb_id = kb.id
-            db.commit()
-            db.refresh(kb)
         
         loader = OneDriveLoader(
             access_token=access_token,

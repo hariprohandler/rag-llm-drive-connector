@@ -212,9 +212,10 @@ class SyncWorker:
             ).first() if job.knowledge_base_id else None
             
             if not kb:
-                kb = KnowledgeBase(
+                from app.helpers.kb_helper import create_knowledge_base_safe
+                kb = create_knowledge_base_safe(
+                    db=db,
                     user_id=job.user_id,
-                    organization_id=job.organization_id,
                     name=f"Zendesk Tickets ({datetime.utcnow().strftime('%Y-%m-%d')})",
                     source_type=SourceType.ZENDESK.value,
                     source_id="zendesk_sync",
@@ -223,10 +224,9 @@ class SyncWorker:
                         "tickets_count": len(tickets)
                     },
                     document_count=0,
+                    organization_id=job.organization_id,
                     is_active=True
                 )
-                db.add(kb)
-                db.flush()
                 job.knowledge_base_id = kb.id
                 db.commit()
             
@@ -414,10 +414,11 @@ class SyncWorker:
             ).first() if job.knowledge_base_id else None
             
             if not kb:
+                from app.helpers.kb_helper import create_knowledge_base_safe
                 kb_name = f"{job.source_type.title()} Messages ({datetime.utcnow().strftime('%Y-%m-%d')})"
-                kb = KnowledgeBase(
+                kb = create_knowledge_base_safe(
+                    db=db,
                     user_id=job.user_id,
-                    organization_id=job.organization_id,
                     name=kb_name,
                     source_type=job.source_type,
                     source_id=f"{job.source_type}_sync",
@@ -427,10 +428,9 @@ class SyncWorker:
                         "connector_id": job.connector_id
                     },
                     document_count=0,
+                    organization_id=job.organization_id,
                     is_active=True
                 )
-                db.add(kb)
-                db.flush()
                 job.knowledge_base_id = kb.id
                 db.commit()
             

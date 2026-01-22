@@ -157,7 +157,10 @@ export const api = {
   createConversation: (body) => request("/api/chat/conversations", { method: "POST", body: JSON.stringify(body) }),
   deleteConversation: (conversationId) => request(`/api/chat/conversations/${conversationId}`, { method: "DELETE" }),
   // Knowledge bases (for file tracking)
-  listKnowledgeBases: () => request("/api/knowledge-bases"),
+  listKnowledgeBases: (includeSyncHistory = false) => {
+    const params = includeSyncHistory ? "?include_sync_history=true" : "";
+    return request(`/api/knowledge-bases${params}`);
+  },
   getKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`),
   deleteKnowledgeBase: (kbId) => request(`/api/knowledge-bases/${kbId}`, { method: "DELETE" }),
   // Tools integration

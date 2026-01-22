@@ -36,6 +36,11 @@ const DocumentsPage = () => {
     }
   }, [activeTab]);
 
+  // Also load knowledge bases on initial mount
+  useEffect(() => {
+    loadKnowledgeBases();
+  }, []);
+
   // Poll task progress if active
   useEffect(() => {
     if (activeTask) {
@@ -60,8 +65,11 @@ const DocumentsPage = () => {
                 message: `Ingestion completed! Knowledge base ID: ${task.knowledge_base_id || "N/A"}`,
               });
               // Reload local files and knowledge bases after completion
-              await loadLocalFiles();
-              await loadKnowledgeBases();
+              await Promise.all([loadLocalFiles(), loadKnowledgeBases()]);
+              // Clear task progress after a delay
+              setTimeout(() => {
+                setTaskProgress(null);
+              }, 3000);
             } else {
               setStatus({
                 type: "error",
@@ -149,12 +157,18 @@ const DocumentsPage = () => {
 
   const loadKnowledgeBases = async () => {
     try {
-      const kbs = await api.listKnowledgeBases();
-      // Filter for local file knowledge bases
-      const localKBs = kbs.filter(kb => kb.source_type === "local_file");
-      setKnowledgeBases(localKBs);
+      const kbs = await api.listKnowledgeBases(true); // Include sync history
+      // Show all knowledge bases, not just local files
+      setKnowledgeBases(kbs);
     } catch (e) {
       console.error("Error loading knowledge bases:", e);
+      // Fallback: try without sync history
+      try {
+        const kbs = await api.listKnowledgeBases();
+        setKnowledgeBases(kbs);
+      } catch (e2) {
+        console.error("Error loading knowledge bases (fallback):", e2);
+      }
     }
   };
 
@@ -269,8 +283,7 @@ const DocumentsPage = () => {
           type: "success",
           message: `Successfully uploaded and ingested ${files.length} file(s). Knowledge base ID: ${data.knowledge_base_id}`,
         });
-        await loadLocalFiles();
-        await loadKnowledgeBases();
+        await Promise.all([loadLocalFiles(), loadKnowledgeBases()]);
         setLoading(false);
       }
     } catch (e) {
@@ -448,11 +461,26 @@ const DocumentsPage = () => {
           </div>
 
           {/* Uploaded Files History */}
-          {knowledgeBases.length > 0 && (
-            <div className="card fade-in-up" style={{ marginTop: "var(--spacing-lg)" }}>
-              <h2 style={{ fontSize: "1.25rem", fontWeight: 600, marginBottom: "var(--spacing-lg)", color: "var(--text-primary)" }}>
-                Uploaded Files History ({knowledgeBases.length})
+          <div className="card fade-in-up" style={{ marginTop: "var(--spacing-lg)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "var(--spacing-lg)" }}>
+              <h2 style={{ fontSize: "1.25rem", fontWeight: 600, color: "var(--text-primary)" }}>
+                Document History ({knowledgeBases.length})
               </h2>
+              <button
+                onClick={loadKnowledgeBases}
+                className="btn btn-secondary"
+                style={{ fontSize: "0.875rem", padding: "var(--spacing-xs) var(--spacing-md)" }}
+                disabled={loadingFiles}
+              >
+                {loadingFiles ? "Loading..." : "🔄 Refresh"}
+              </button>
+            </div>
+            
+            {knowledgeBases.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "var(--spacing-xl)", color: "var(--text-secondary)" }}>
+                <p>No documents ingested yet. Upload files above to get started.</p>
+              </div>
+            ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--spacing-md)" }}>
                 {knowledgeBases.map((kb) => (
                   <div
@@ -467,10 +495,31 @@ const DocumentsPage = () => {
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "var(--spacing-sm)" }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", marginBottom: "var(--spacing-xs)" }}>
-                          <div style={{ fontWeight: 600, fontSize: "1rem" }}>
-                            📁 {kb.name}
+                        <div style={{ display: "flex", alignItems: "center", gap: "var(--spacing-xs)", marginBottom: "var(--spacing-xs)", flexWrap: "wrap" }}>
+                          <div style={{ fontWeight: 600, fontSize: "1rem", display: "flex", alignItems: "center", gap: "var(--spacing-xs)" }}>
+                            {kb.source_type === "local_file" ? "📁" : 
+                             kb.source_type === "gmail" ? "📨" :
+                             kb.source_type === "outlook" ? "📧" :
+                             kb.source_type === "slack" ? "💬" :
+                             kb.source_type === "teams" ? "👥" :
+                             kb.source_type === "google_drive" ? "☁️" :
+                             kb.source_type === "onedrive" ? "📂" :
+                             kb.source_type === "zendesk" ? "🎫" : "📄"}
+                            <span>{kb.name}</span>
                           </div>
+                          <span
+                            style={{
+                              padding: "2px var(--spacing-xs)",
+                              background: "var(--gray-200)",
+                              color: "var(--text-secondary)",
+                              borderRadius: "var(--radius-full)",
+                              fontSize: "0.7rem",
+                              fontWeight: 500,
+                              textTransform: "capitalize",
+                            }}
+                          >
+                            {kb.source_type?.replace("_", " ") || "unknown"}
+                          </span>
                           {kb.extra_metadata?.has_duplicates && (
                             <span
                               style={{
@@ -486,9 +535,47 @@ const DocumentsPage = () => {
                             </span>
                           )}
                         </div>
-                        <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-                          {kb.document_count || 0} documents • Created {new Date(kb.created_at).toLocaleDateString()}
+                        <div style={{ fontSize: "0.875rem", color: "var(--text-secondary)", display: "flex", gap: "var(--spacing-md)", flexWrap: "wrap" }}>
+                          <span>{kb.document_count || 0} documents</span>
+                          <span>•</span>
+                          <span>Created {new Date(kb.created_at).toLocaleDateString()}</span>
+                          {kb.last_sync_at && (
+                            <>
+                              <span>•</span>
+                              <span>Last synced: {new Date(kb.last_sync_at).toLocaleDateString()}</span>
+                            </>
+                          )}
+                          {kb.last_sync_status && (
+                            <>
+                              <span>•</span>
+                              <span style={{ 
+                                padding: "2px var(--spacing-xs)",
+                                background: kb.last_sync_status === "completed" ? "var(--success)" : 
+                                           kb.last_sync_status === "failed" ? "var(--error)" : "var(--warning)",
+                                color: "var(--text-inverse)",
+                                borderRadius: "var(--radius-full)",
+                                fontSize: "0.75rem",
+                                fontWeight: 500,
+                              }}>
+                                {kb.last_sync_status === "completed" ? "✓ Synced" : 
+                                 kb.last_sync_status === "failed" ? "✗ Failed" : 
+                                 kb.last_sync_status === "processing" ? "⏳ Syncing" : "⏸ Pending"}
+                              </span>
+                            </>
+                          )}
                         </div>
+                        {kb.last_sync_error && (
+                          <div style={{ 
+                            marginTop: "var(--spacing-xs)",
+                            padding: "var(--spacing-xs)",
+                            background: "var(--error-light)",
+                            color: "var(--error)",
+                            borderRadius: "var(--radius-sm)",
+                            fontSize: "0.75rem"
+                          }}>
+                            ⚠️ Last sync error: {kb.last_sync_error}
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => deleteKnowledgeBase(kb.id)}
@@ -543,11 +630,56 @@ const DocumentsPage = () => {
                         ⚠️ Duplicate files detected: {kb.extra_metadata.duplicate_files.join(", ")}
                       </div>
                     )}
+                    {kb.sync_history && kb.sync_history.length > 0 && (
+                      <div style={{ marginTop: "var(--spacing-sm)", borderTop: "1px solid var(--gray-200)", paddingTop: "var(--spacing-sm)" }}>
+                        <details style={{ fontSize: "0.875rem" }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 500, color: "var(--text-secondary)", marginBottom: "var(--spacing-xs)" }}>
+                            Sync History ({kb.sync_history.length})
+                          </summary>
+                          <div style={{ marginTop: "var(--spacing-xs)", display: "flex", flexDirection: "column", gap: "var(--spacing-xs)" }}>
+                            {kb.sync_history.slice(0, 5).map((sync, idx) => (
+                              <div key={idx} style={{ 
+                                padding: "var(--spacing-xs)",
+                                background: "var(--gray-50)",
+                                borderRadius: "var(--radius-sm)",
+                                fontSize: "0.75rem"
+                              }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                  <span style={{ fontWeight: 500 }}>
+                                    {new Date(sync.created_at).toLocaleString()}
+                                  </span>
+                                  <span style={{
+                                    padding: "2px var(--spacing-xs)",
+                                    background: sync.status === "completed" ? "var(--success)" : 
+                                               sync.status === "failed" ? "var(--error)" : "var(--warning)",
+                                    color: "var(--text-inverse)",
+                                    borderRadius: "var(--radius-full)",
+                                    fontSize: "0.7rem"
+                                  }}>
+                                    {sync.status}
+                                  </span>
+                                </div>
+                                {sync.items_processed && sync.items_total && (
+                                  <div style={{ marginTop: "var(--spacing-xs)", color: "var(--text-secondary)" }}>
+                                    {sync.items_processed} / {sync.items_total} items
+                                  </div>
+                                )}
+                                {sync.error_message && (
+                                  <div style={{ marginTop: "var(--spacing-xs)", color: "var(--error)", fontSize: "0.7rem" }}>
+                                    {sync.error_message}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
