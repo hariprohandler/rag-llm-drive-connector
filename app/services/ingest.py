@@ -8,8 +8,13 @@ from langchain_postgres import PGVector
 from langchain_core.documents import Document
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
+from datetime import datetime
+import json
 from app.core.config import settings
 from app.models import KnowledgeBase, UserSettings
+from app.models.knowledge_base import safe_query_knowledge_bases
+from app.models.user_settings import safe_query_user_settings
 from app.helpers.vector_db_helper import get_collection_name, get_user_vector_db_url, get_vector_table_name
 from app.constants import DefaultValues, SourceType
 import os
@@ -207,11 +212,20 @@ def ingest_local_files(
     # Check for duplicate files by comparing file name and size
     existing_kbs = []
     if db:
-        existing_kbs = db.query(KnowledgeBase).filter(
-            KnowledgeBase.user_id == user_id,
-            KnowledgeBase.source_type == "local_file",
-            KnowledgeBase.is_active == True
-        ).all()
+        try:
+            existing_kbs = safe_query_knowledge_bases(
+                db,
+                {
+                    "user_id": user_id,
+                    "source_type": "local_file",
+                    "is_active": True
+                }
+            )
+        except Exception as e:
+            # If query fails, log and continue without duplicate detection
+            print(f"Warning: Could not query existing knowledge bases for duplicate detection: {e}")
+            db.rollback()
+            existing_kbs = []
     
     # Build a set of existing files (name + size) for duplicate detection
     existing_files = set()
@@ -304,7 +318,12 @@ def ingest_local_files(
     # Get user's vector DB configuration if available
     user_vector_db_url = None
     if db:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+        try:
+            user_settings = safe_query_user_settings(db, user_id)
+        except Exception as e:
+            print(f"Warning: Could not query user settings: {e}")
+            db.rollback()
+            user_settings = None
         user_vector_db_url = get_user_vector_db_url(user_settings)
     
     # Create knowledge base entry first if db provided (to get kb_id for collection naming)
@@ -321,11 +340,15 @@ def ingest_local_files(
             # Sanitize file paths - remove NUL characters and other problematic characters
             sanitized_paths = [path.replace('\x00', '') for path in file_paths]
             # Store sanitized file paths in extra_metadata instead of source_id to avoid NUL character issues
-            kb = KnowledgeBase(
+            # Use safe helper function to create KB
+            from app.helpers.kb_helper import create_knowledge_base_safe
+            
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="local_file",
-                source_id="local_files",  # Use a simple identifier instead of file paths
+                source_id="local_files",
                 extra_metadata={
                     "files": file_metadata, 
                     "file_paths": sanitized_paths,
@@ -333,13 +356,10 @@ def ingest_local_files(
                     "duplicate_files": duplicate_files,
                 },
                 document_count=len(all_documents),
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()  # Flush to get the ID without committing
             kb_id = kb.id
-            db.commit()  # Now commit
-            db.refresh(kb)  # Refresh to ensure we have the latest state
             print(f"Successfully created knowledge base with ID: {kb_id} for user: {user_id}, name: {kb_name}")
         except Exception as e:
             print(f"ERROR creating knowledge base entry: {e}")
@@ -399,27 +419,31 @@ def ingest_google_drive(
         # Get user's vector DB configuration if available
         user_vector_db_url = None
         if db:
-            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            try:
+                user_settings = safe_query_user_settings(db, user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
         
         # Create knowledge base entry first (to get kb_id for collection naming)
         kb_id = knowledge_base_id
         if db and not kb_id:
+            from app.helpers.kb_helper import create_knowledge_base_safe
             kb_name = knowledge_base_name or f"Google Drive Folder ({folder_id})"
-            kb = KnowledgeBase(
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="google_drive",
                 source_id=folder_id,
                 extra_metadata={"folder_id": folder_id},
                 document_count=0,  # Will update after ingestion
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()
             kb_id = kb.id
-            db.commit()
-            db.refresh(kb)
         
         loader = GoogleDriveLoader(
             folder_id=folder_id,
@@ -486,27 +510,31 @@ def ingest_onedrive(
         # Get user's vector DB configuration if available
         user_vector_db_url = None
         if db:
-            user_settings = db.query(UserSettings).filter(UserSettings.user_id == user_id).first()
+            try:
+                user_settings = safe_query_user_settings(db, user_id)
+            except Exception as e:
+                print(f"Warning: Could not query user settings: {e}")
+                db.rollback()
+                user_settings = None
             user_vector_db_url = get_user_vector_db_url(user_settings)
         
         # Create knowledge base entry first (to get kb_id for collection naming)
         kb_id = knowledge_base_id
         if db and not kb_id:
+            from app.helpers.kb_helper import create_knowledge_base_safe
             kb_name = knowledge_base_name or f"OneDrive Folder ({folder_path})"
-            kb = KnowledgeBase(
+            kb = create_knowledge_base_safe(
+                db=db,
                 user_id=user_id,
                 name=kb_name,
                 source_type="onedrive",
                 source_id=folder_path,
                 extra_metadata={"folder_path": folder_path},
                 document_count=0,  # Will update after ingestion
+                organization_id=None,
                 is_active=True
             )
-            db.add(kb)
-            db.flush()
             kb_id = kb.id
-            db.commit()
-            db.refresh(kb)
         
         loader = OneDriveLoader(
             access_token=access_token,

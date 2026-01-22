@@ -36,12 +36,13 @@ def get_google_oauth_flow(redirect_uri: str) -> Flow:
         }
     }
     
-    # Scopes for user info and Drive access
+    # Scopes for user info, Drive access, and Gmail
     scopes = [
         "openid",
         "https://www.googleapis.com/auth/userinfo.email",
         "https://www.googleapis.com/auth/userinfo.profile",
-        "https://www.googleapis.com/auth/drive.readonly"
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/gmail.readonly"
     ]
     
     flow = Flow.from_client_config(
@@ -196,7 +197,9 @@ def get_microsoft_auth_url(redirect_uri: str, request: Optional[Request] = None,
         "openid",
         "email",
         "profile",
-        "Files.Read.All"
+        "Files.Read.All",
+        "Mail.Read",
+        "Chat.Read"
     ]
     
     auth_url = (

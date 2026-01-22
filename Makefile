@@ -88,6 +88,12 @@ migrate: ## Run database migrations (supports ENVIRONMENT variable)
 		alembic upgrade head; \
 	fi
 
+migrate-docker: ## Run database migrations inside Docker container
+	@echo "Running migrations inside Docker container..."
+	@docker-compose exec app python -m alembic upgrade head || \
+	 docker exec rag-app python -m alembic upgrade head || \
+	 (echo "Error: Could not find running container. Make sure Docker containers are running." && exit 1)
+
 migrate-create: ## Create a new migration (usage: make migrate-create MESSAGE="description")
 	@if [ -n "$$ENVIRONMENT" ]; then \
 		ENVIRONMENT=$$ENVIRONMENT alembic revision --autogenerate -m "$(MESSAGE)"; \

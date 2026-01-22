@@ -6,6 +6,7 @@ from datetime import datetime
 
 from app.models import User, UserSettings
 from app.models.base import get_db
+from app.models.user_settings import safe_query_user_settings
 from app.services.auth_service import get_current_user
 from app.helpers.logging_helper import ActivityLogger
 from app.helpers.vector_db_helper import check_pgvector_compatibility, test_vector_db_connection
@@ -38,7 +39,11 @@ async def get_organization_settings(
     db: Session = Depends(get_db),
 ):
     """Get organization settings for the current user."""
-    user_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+    try:
+        user_settings = safe_query_user_settings(db, current_user.id)
+    except Exception as e:
+        db.rollback()
+        user_settings = None
     
     if user_settings:
         return {"organization_name": user_settings.organization_name or "Anukara"}
@@ -64,7 +69,10 @@ async def update_organization_settings(
         metadata={"organization_name": request.organization_name}
     )
     try:
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+        user_settings = safe_query_user_settings(db, current_user.id)
+    except Exception as e:
+        db.rollback()
+        user_settings = None
         
         if user_settings:
             # Update existing settings
@@ -95,7 +103,11 @@ async def get_vector_db_settings(
     db: Session = Depends(get_db),
 ):
     """Get vector database settings for the current user."""
-    user_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+    try:
+        user_settings = safe_query_user_settings(db, current_user.id)
+    except Exception as e:
+        db.rollback()
+        user_settings = None
     
     if user_settings:
         return {
@@ -150,7 +162,11 @@ async def update_vector_db_settings(
                     detail=f"Vector database connection test failed: {message}"
                 )
         
-        user_settings = db.query(UserSettings).filter(UserSettings.user_id == current_user.id).first()
+        try:
+            user_settings = safe_query_user_settings(db, current_user.id)
+        except Exception as e:
+            db.rollback()
+            user_settings = None
         
         if user_settings:
             # Update existing settings

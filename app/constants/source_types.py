@@ -14,6 +14,10 @@ class SourceType(str, Enum):
     SLACK = "slack"
     TEAMS = "teams"
     
+    # Email platforms
+    GMAIL = "gmail"
+    OUTLOOK = "outlook"
+    
     # Support platforms
     ZENDESK = "zendesk"
     
@@ -67,6 +71,18 @@ SOURCE_TYPE_CONFIG = {
     },
     SourceType.TEAMS: {
         "display_name": "Microsoft Teams",
+        "supports_sync": True,
+        "requires_oauth": True,
+        "provider": "microsoft",
+    },
+    SourceType.GMAIL: {
+        "display_name": "Gmail",
+        "supports_sync": True,
+        "requires_oauth": True,
+        "provider": "google",
+    },
+    SourceType.OUTLOOK: {
+        "display_name": "Outlook",
         "supports_sync": True,
         "requires_oauth": True,
         "provider": "microsoft",

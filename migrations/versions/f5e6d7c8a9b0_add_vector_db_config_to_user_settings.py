@@ -19,10 +19,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Add vector database configuration columns to user_settings table
-    op.add_column('user_settings', sa.Column('vector_db_url', sa.String(), nullable=True))
-    op.add_column('user_settings', sa.Column('vector_db_config', postgresql.JSON(astext_type=sa.Text()), nullable=True))
-    op.add_column('user_settings', sa.Column('vector_db_enabled', sa.Boolean(), nullable=False, server_default='false'))
+    # Add vector database configuration columns to user_settings table (backward compatible - check if columns exist first)
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    columns = [col['name'] for col in inspector.get_columns('user_settings')]
+    
+    if 'vector_db_url' not in columns:
+        op.add_column('user_settings', sa.Column('vector_db_url', sa.String(), nullable=True))
+    if 'vector_db_config' not in columns:
+        op.add_column('user_settings', sa.Column('vector_db_config', postgresql.JSON(astext_type=sa.Text()), nullable=True))
+    if 'vector_db_enabled' not in columns:
+        op.add_column('user_settings', sa.Column('vector_db_enabled', sa.Boolean(), nullable=False, server_default='false'))
 
 
 def downgrade() -> None:

@@ -19,8 +19,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Check if tables already exist (idempotent migration)
+    from sqlalchemy import inspect
+    conn = op.get_bind()
+    inspector = inspect(conn)
+    existing_tables = inspector.get_table_names()
+    
     # Create organizations table
-    op.create_table('organizations',
+    if 'organizations' not in existing_tables:
+        op.create_table('organizations',
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('name', sa.String(), nullable=False),
         sa.Column('slug', sa.String(), nullable=False),
@@ -33,14 +40,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('slug')
-    )
-    op.create_index(op.f('ix_organizations_name'), 'organizations', ['name'], unique=False)
-    op.create_index(op.f('ix_organizations_slug'), 'organizations', ['slug'], unique=True)
-    op.create_index(op.f('ix_organizations_is_active'), 'organizations', ['is_active'], unique=False)
-    op.create_index(op.f('ix_organizations_created_at'), 'organizations', ['created_at'], unique=False)
+        )
+        op.create_index(op.f('ix_organizations_name'), 'organizations', ['name'], unique=False)
+        op.create_index(op.f('ix_organizations_slug'), 'organizations', ['slug'], unique=True)
+        op.create_index(op.f('ix_organizations_is_active'), 'organizations', ['is_active'], unique=False)
+        op.create_index(op.f('ix_organizations_created_at'), 'organizations', ['created_at'], unique=False)
     
     # Create organization_members table
-    op.create_table('organization_members',
+    if 'organization_members' not in existing_tables:
+        op.create_table('organization_members',
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('organization_id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.String(), nullable=False),
@@ -54,15 +62,16 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['invited_by'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'user_id', name='uq_org_member')
-    )
-    op.create_index(op.f('ix_organization_members_organization_id'), 'organization_members', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_organization_members_user_id'), 'organization_members', ['user_id'], unique=False)
-    op.create_index(op.f('ix_organization_members_role'), 'organization_members', ['role'], unique=False)
-    op.create_index(op.f('ix_organization_members_is_active'), 'organization_members', ['is_active'], unique=False)
-    op.create_index('ix_org_member_user_org', 'organization_members', ['user_id', 'organization_id'], unique=False)
+        )
+        op.create_index(op.f('ix_organization_members_organization_id'), 'organization_members', ['organization_id'], unique=False)
+        op.create_index(op.f('ix_organization_members_user_id'), 'organization_members', ['user_id'], unique=False)
+        op.create_index(op.f('ix_organization_members_role'), 'organization_members', ['role'], unique=False)
+        op.create_index(op.f('ix_organization_members_is_active'), 'organization_members', ['is_active'], unique=False)
+        op.create_index('ix_org_member_user_org', 'organization_members', ['user_id', 'organization_id'], unique=False)
     
     # Create organization_groups table
-    op.create_table('organization_groups',
+    if 'organization_groups' not in existing_tables:
+        op.create_table('organization_groups',
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('organization_id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(), nullable=False),
@@ -75,13 +84,14 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('organization_id', 'name', name='uq_org_group_name')
-    )
-    op.create_index(op.f('ix_organization_groups_organization_id'), 'organization_groups', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_organization_groups_name'), 'organization_groups', ['name'], unique=False)
-    op.create_index(op.f('ix_organization_groups_is_active'), 'organization_groups', ['is_active'], unique=False)
+        )
+        op.create_index(op.f('ix_organization_groups_organization_id'), 'organization_groups', ['organization_id'], unique=False)
+        op.create_index(op.f('ix_organization_groups_name'), 'organization_groups', ['name'], unique=False)
+        op.create_index(op.f('ix_organization_groups_is_active'), 'organization_groups', ['is_active'], unique=False)
     
     # Create organization_group_members table (many-to-many)
-    op.create_table('organization_group_members',
+    if 'organization_group_members' not in existing_tables:
+        op.create_table('organization_group_members',
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('group_id', sa.Integer(), nullable=False),
         sa.Column('member_id', sa.Integer(), nullable=False),
@@ -92,18 +102,27 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['added_by'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('group_id', 'member_id', name='uq_group_member')
-    )
-    op.create_index(op.f('ix_organization_group_members_group_id'), 'organization_group_members', ['group_id'], unique=False)
-    op.create_index(op.f('ix_organization_group_members_member_id'), 'organization_group_members', ['member_id'], unique=False)
-    op.create_index('ix_group_member_ids', 'organization_group_members', ['group_id', 'member_id'], unique=False)
+        )
+        op.create_index(op.f('ix_organization_group_members_group_id'), 'organization_group_members', ['group_id'], unique=False)
+        op.create_index(op.f('ix_organization_group_members_member_id'), 'organization_group_members', ['member_id'], unique=False)
+        op.create_index('ix_group_member_ids', 'organization_group_members', ['group_id', 'member_id'], unique=False)
     
-    # Add organization_id to knowledge_bases table
-    op.add_column('knowledge_bases', sa.Column('organization_id', sa.Integer(), nullable=True))
-    op.create_foreign_key('fk_kb_organization', 'knowledge_bases', 'organizations', ['organization_id'], ['id'], ondelete='CASCADE')
-    op.create_index(op.f('ix_knowledge_bases_organization_id'), 'knowledge_bases', ['organization_id'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_source_type'), 'knowledge_bases', ['source_type'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_is_active'), 'knowledge_bases', ['is_active'], unique=False)
-    op.create_index(op.f('ix_knowledge_bases_created_at'), 'knowledge_bases', ['created_at'], unique=False)
+    # Add organization_id to knowledge_bases table (backward compatible - check if column exists first)
+    columns = [col['name'] for col in inspector.get_columns('knowledge_bases')]
+    
+    if 'organization_id' not in columns:
+        op.add_column('knowledge_bases', sa.Column('organization_id', sa.Integer(), nullable=True))
+        op.create_foreign_key('fk_kb_organization', 'knowledge_bases', 'organizations', ['organization_id'], ['id'], ondelete='CASCADE')
+        op.create_index(op.f('ix_knowledge_bases_organization_id'), 'knowledge_bases', ['organization_id'], unique=False)
+    
+    # Create other indexes if they don't exist (idempotent)
+    indexes = [idx['name'] for idx in inspector.get_indexes('knowledge_bases')]
+    if 'ix_knowledge_bases_source_type' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_source_type'), 'knowledge_bases', ['source_type'], unique=False)
+    if 'ix_knowledge_bases_is_active' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_is_active'), 'knowledge_bases', ['is_active'], unique=False)
+    if 'ix_knowledge_bases_created_at' not in indexes:
+        op.create_index(op.f('ix_knowledge_bases_created_at'), 'knowledge_bases', ['created_at'], unique=False)
 
 
 def downgrade() -> None:

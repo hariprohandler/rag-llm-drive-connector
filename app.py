@@ -4,13 +4,17 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from app.core.config import settings
-from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes, drive_routes, tools_routes, database_routes
+from app.api import auth_routes, ingest_routes, llm_config_routes, chat_routes, kb_routes, query_routes, settings_routes, drive_routes, tools_routes, database_routes, connector_routes, webhook_routes
 from app.middleware.tracing import TracingMiddleware
 
 # Initialize database
 from app.models.base import init_db
 
 init_db()
+
+# Start background sync worker
+from app.services.sync_worker import get_sync_worker
+get_sync_worker()  # This will start the worker thread
 
 app = FastAPI(title="RAG LLM Drive Connector", version="1.0.0")
 
@@ -21,17 +25,47 @@ app.add_middleware(TracingMiddleware)
 # Note: When allow_credentials=True, you cannot use allow_origins=["*"]
 # Must specify explicit origins
 frontend_url = settings.frontend_base_url
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        frontend_url,
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Common development origins for Vite/React
+allowed_origins = [
+    frontend_url,
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",  # Vite default port
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",  # Vite alternate port
+    "http://127.0.0.1:5174",
+    "http://localhost:4173",  # Vite preview port
+    "http://127.0.0.1:4173",
+]
+
+# Remove duplicates and filter out empty strings
+allowed_origins = list(set([origin for origin in allowed_origins if origin]))
+
+# For development, allow any localhost port (more permissive)
+# For production, use explicit origins only
+import os
+environment = os.getenv("ENVIRONMENT", "").lower()
+if environment in ["development", "dev", ""]:
+    # In development, be more permissive with localhost
+    # This allows any localhost port to work
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+    )
+else:
+    # Production: use explicit origins only
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
+    )
 
 # Router registration (modular API)
 app.include_router(auth_routes.router)
@@ -44,6 +78,8 @@ app.include_router(settings_routes.router)
 app.include_router(drive_routes.router)
 app.include_router(tools_routes.router)
 app.include_router(database_routes.router)
+app.include_router(connector_routes.router)
+app.include_router(webhook_routes.router)
 
 
 @app.get("/")
